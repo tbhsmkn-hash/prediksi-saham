@@ -4,3 +4,5 @@ gunicorn
 numpy
 pandas
 pyngrok
+streamlit==1.x.x
+requests==2.x.x
