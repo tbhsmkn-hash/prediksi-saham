@@ -1,0 +1,6 @@
+Flask
+pmdarima
+gunicorn
+numpy
+pandas
+pyngrok
