@@ -7,3 +7,4 @@ statsmodels
 requests
 gunicorn
 yfinance
+matplotlib
