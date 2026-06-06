@@ -1,8 +1,7 @@
-streamlit
-Flask
-pmdarima==2.0.4
-numpy
-pandas
-requests
+streamlit>=1.35.0
+numpy>=1.26.0,<2.0.0
+pandas>=2.0.0
+pmdarima>=2.0.4
 scikit-learn
 statsmodels
+requests
