@@ -1,54 +1,49 @@
 import streamlit as st
+import yfinance as yf
 import pandas as pd
-import pmdarima as pm
+import datetime
 
-# 1. Konfigurasi Halaman Antarmuka Streamlit
-st.set_page_config(page_title="Prediksi Saham ARIMA", layout="centered")
-st.title("🚀 Aplikasi Prediksi Saham (Auto-ARIMA)")
-st.write("Masukkan data historis untuk melakukan forecasting otomatis.")
+# --- Pilih Saham & Periode ---
+TICKER_SYMBOL = "AAPL" 
+START_DATE = "2020-01-01" 
+END_DATE = datetime.date.today().strftime("%Y-%m-%d") 
 
-# 2. Input Data dari Pengguna di Antarmuka Web
-# Memberikan nilai default berupa list angka agar user langsung melihat contohnya
-input_data = st.text_area(
-    "Masukkan data historis (pisahkan dengan koma):", 
-    value="100.0, 101.5, 102.3, 103.1, 104.5, 105.2, 106.0, 107.8, 108.5, 109.1, 110.0"
-)
+st.title(f"Prediksi Harga Saham {TICKER_SYMBOL}")
 
-forecast_horizon = st.number_input("Jumlah Langkah Prediksi ke Depan (Horizon):", min_value=1, max_value=30, value=5)
-
-# 3. Tombol Eksekusi Prediksi
-if st.button("Jalankan Prediksi"):
+@st.cache_data 
+def get_stock_data(ticker, start, end):
+    """Mengambil data historis saham dari Yahoo Finance."""
     try:
-        # Proses parsing input teks menjadi list dari angka float
-        historical_prices = [float(x.strip()) for x in input_data.split(",") if x.strip()]
-        
-        if len(historical_prices) < 5:
-            st.error("Data terlalu sedikit! Masukkan minimal 5 data historis.")
-        else:
-            with st.spinner("Sedang menghitung model Auto-ARIMA..."):
-                # Konversi ke pandas Series
-                series = pd.Series(historical_prices)
-                
-                # Training model ARIMA otomatis
-                model = pm.auto_arima(series, seasonal=False, stepwise=True, suppress_warnings=True, error_action="ignore")
-                
-                # Melakukan forecasting
-                predictions = model.predict(n_periods=int(forecast_horizon)).tolist()
-                
-            # Tampilkan Hasil di Layar Web Streamlit
-            st.success("Prediksi Berhasil!")
-            
-            # Tampilkan dalam bentuk dataframe/tabel ringkas
-            df_res = pd.DataFrame({
-                "Langkah ke-": [i+1 for i in range(len(predictions))],
-                "Hasil Prediksi": predictions
-            })
-            st.dataframe(df_res, use_container_width=True)
-            
-            # Opsional: Tampilkan grafik garis sederhana
-            st.line_chart(predictions)
-            
-    except ValueError:
-        st.error("Format data salah! Pastikan hanya memasukkan angka yang dipisahkan oleh koma (contoh: 10.5, 11.2, 13.0).")
+        # Perbaikan KeyError: Tambahkan auto_adjust=True agar kolom menjadi Single Index yang bersih
+        data = yf.download(ticker, start=start, end=end, auto_adjust=True)
+        data.dropna(inplace=True)
+        return data
     except Exception as e:
-        st.error(f"Terjadi kesalahan pada model: {e}")
+        st.error(f"Gagal mengambil data saham untuk {ticker}: {e}")
+        return pd.DataFrame()
+
+# --- Tampilkan Input Pengguna untuk Saham dan Tanggal ---
+st.sidebar.header("Pengaturan Data")
+selected_ticker = st.sidebar.text_input("Simbol Saham", TICKER_SYMBOL).upper()
+selected_start_date = st.sidebar.date_input("Tanggal Mulai", datetime.date(2020, 1, 1))
+selected_end_date = st.sidebar.date_input("Tanggal Akhir", datetime.date.today())
+
+if selected_end_date < selected_start_date:
+    st.sidebar.error("Tanggal akhir harus setelah tanggal mulai.")
+    st.stop() 
+
+# --- Ambil Data ---
+df_stock = get_stock_data(selected_ticker, selected_start_date.strftime("%Y-%m-%d"), selected_end_date.strftime("%Y-%m-%d"))
+
+if not df_stock.empty:
+    st.subheader(f"Data Historis Harga Saham {selected_ticker}")
+    st.write(df_stock.tail()) 
+    
+    # Perbaikan KeyError: Karena auto_adjust=True, gunakan kolom 'Close'
+    if 'Close' in df_stock.columns:
+        st.line_chart(df_stock['Close']) 
+    else:
+        # Cadangan jika kolom MultiIndex tetap terbentuk di beberapa versi enviroment
+        st.line_chart(df_stock.iloc[:, 0]) 
+else:
+    st.warning("Tidak ada data saham yang tersedia atau terjadi kesalahan saat mengambil data.")
