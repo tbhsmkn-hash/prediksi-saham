@@ -1,67 +1,54 @@
-import os
-from flask import Flask, request, jsonify
-import pmdarima as pm
-import numpy as np
+import streamlit as st
 import pandas as pd
-import logging
-import threading # Untuk menjalankan Flask di thread terpisah
+import pmdarima as pm
 
-# Konfigurasi logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# 1. Konfigurasi Halaman Antarmuka Streamlit
+st.set_page_config(page_title="Prediksi Saham ARIMA", layout="centered")
+st.title("🚀 Aplikasi Prediksi Saham (Auto-ARIMA)")
+st.write("Masukkan data historis untuk melakukan forecasting otomatis.")
 
-app = Flask(__name__)
+# 2. Input Data dari Pengguna di Antarmuka Web
+# Memberikan nilai default berupa list angka agar user langsung melihat contohnya
+input_data = st.text_area(
+    "Masukkan data historis (pisahkan dengan koma):", 
+    value="100.0, 101.5, 102.3, 103.1, 104.5, 105.2, 106.0, 107.8, 108.5, 109.1, 110.0"
+)
 
-@app.route('/predict', methods=['POST'])
-def predict_arima():
-    if not request.is_json:
-        logger.error("Request must be JSON")
-        return jsonify({"error": "Request must be JSON"}), 400
+forecast_horizon = st.number_input("Jumlah Langkah Prediksi ke Depan (Horizon):", min_value=1, max_value=30, value=5)
 
-    data = request.get_json()
-
-    historical_prices = data.get('data')
-    forecast_horizon = data.get('forecast_horizon')
-
-    if not historical_prices or not isinstance(historical_prices, list):
-        logger.error("Missing or invalid 'data' (historical_prices) in request")
-        return jsonify({"error": "Missing or invalid 'data' (historical_prices)"}), 400
-
-    if not forecast_horizon or not isinstance(forecast_horizon, int) or forecast_horizon <= 0:
-        logger.error("Missing or invalid 'forecast_horizon' in request. Must be a positive integer.")
-        return jsonify({"error": "Missing or invalid 'forecast_horizon'. Must be a positive integer."}), 400
-
+# 3. Tombol Eksekusi Prediksi
+if st.button("Jalankan Prediksi"):
     try:
-        # Konversi list harga ke Pandas Series
-        series = pd.Series(historical_prices)
-
-        logger.info(f"Received {len(historical_prices)} historical data points.")
-        logger.info(f"Forecast horizon: {forecast_horizon} days.")
-
-        # Menggunakan auto_arima untuk secara otomatis menemukan parameter (p,d,q) terbaik
-        model = pm.auto_arima(series,
-                              seasonal=False,
-                              stepwise=True,
-                              suppress_warnings=True,
-                              error_action="ignore",
-                              max_order=None,
-                              trace=False
-                             )
-
-        logger.info(f"ARIMA model fitted with order: {model.order}")
-
-        # Lakukan prediksi
-        predictions = model.predict(n_periods=forecast_horizon).tolist()
-
-        logger.info(f"Generated {len(predictions)} predictions.")
-
-        return jsonify({"predictions": predictions}), 200
-
+        # Proses parsing input teks menjadi list dari angka float
+        historical_prices = [float(x.strip()) for x in input_data.split(",") if x.strip()]
+        
+        if len(historical_prices) < 5:
+            st.error("Data terlalu sedikit! Masukkan minimal 5 data historis.")
+        else:
+            with st.spinner("Sedang menghitung model Auto-ARIMA..."):
+                # Konversi ke pandas Series
+                series = pd.Series(historical_prices)
+                
+                # Training model ARIMA otomatis
+                model = pm.auto_arima(series, seasonal=False, stepwise=True, suppress_warnings=True, error_action="ignore")
+                
+                # Melakukan forecasting
+                predictions = model.predict(n_periods=int(forecast_horizon)).tolist()
+                
+            # Tampilkan Hasil di Layar Web Streamlit
+            st.success("Prediksi Berhasil!")
+            
+            # Tampilkan dalam bentuk dataframe/tabel ringkas
+            df_res = pd.DataFrame({
+                "Langkah ke-": [i+1 for i in range(len(predictions))],
+                "Hasil Prediksi": predictions
+            })
+            st.dataframe(df_res, use_container_width=True)
+            
+            # Opsional: Tampilkan grafik garis sederhana
+            st.line_chart(predictions)
+            
+    except ValueError:
+        st.error("Format data salah! Pastikan hanya memasukkan angka yang dipisahkan oleh koma (contoh: 10.5, 11.2, 13.0).")
     except Exception as e:
-        logger.error(f"Error during ARIMA prediction: {e}", exc_info=True)
-        return jsonify({"error": str(e)}), 500
-
-# Fungsi untuk menjalankan Flask app di thread terpisah
-def run_flask_app():
-    # Colab secara default akan menjalankan di localhost, port 5001
-    app.run(host='0.0.0.0', port=5001)
+        st.error(f"Terjadi kesalahan pada model: {e}")
