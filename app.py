@@ -63,7 +63,7 @@ if not df_stock.empty and 'Close' in df_stock.columns:
             try:
                 # 1. Training Model ARIMA menggunakan seri Close price
                 # Memastikan frekuensi index diatur (b/business day karena bursa libur di akhir pekan)
-                series_close = df_stock['Close'].asfreq('B').fillna(method='ffill')
+                series_close = df_stock['Close'].asfreq('B').ffill()
                 
                 model = ARIMA(series_close, order=(p, d, q))
                 model_fit = model.fit()
