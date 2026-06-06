@@ -1,8 +1,8 @@
+streamlit
 Flask
-pmdarima
-gunicorn
+pmdarima==2.0.4
 numpy
 pandas
-pyngrok
-streamlit==1.x.x
-requests==2.x.x
+requests
+scikit-learn
+statsmodels
