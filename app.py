@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import datetime
 
 # --- Pengaturan Halaman Utama ---
-st.title("Aplikasi Prediksi Harga Cryptocurrency Berbasis Model ARIMA")
+st.title("Aplikasi Prediksi Harga Cryptocurrency-ARIMA")
 st.write("Aplikasi ini melatih model ARIMA secara real-time menggunakan data historis langsung dari Yahoo Finance.")
 
 # --- Pengaturan Data di Sidebar ---
