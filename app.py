@@ -12,9 +12,29 @@ st.write("Aplikasi ini melatih model ARIMA secara real-time menggunakan data his
 # --- Pengaturan Data di Sidebar ---
 st.sidebar.header("1. Pengaturan Data Crypto")
 # Menggunakan ticker Crypto (format yfinance untuk crypto umumnya diakhiri dengan '-USD')
-selected_crypto = st.sidebar.text_input("Simbol Crypto (Ticker)", "BTC-USD").upper()
+# --- DAFTAR 50 COIN CRYPTO TERPOPULER (Untuk Dropdown) ---
+CRYPTO_LIST = [
+    "BTC-USD", "ETH-USD", "BNB-USD", "SOL-USD", "XRP-USD", 
+    "ADA-USD", "DOGE-USD", "SHIB-USD", "AVAX-USD", "DOT-USD",
+    "MATIC-USD", "LINK-USD", "TRX-USD", "UNI-USD", "ICP-USD",
+    "BCH-USD", "NEAR-USD", "FIL-USD", "LTC-USD", "LEO-USD",
+    "ETC-USD", "APT-USD", "ATOM-USD", "XLM-USD", "HBAR-USD",
+    "IMX-USD", "GRT-USD", "STX-USD", "KAS-USD", "TON-USD",
+    "PEPE-USD", "WIF-USD", "FLOKI-USD", "RUNE-USD", "RENDER-USD",
+    "THETA-USD", "FTM-USD", "LUNC-USD", "AAVE-USD", "ALGO-USD",
+    "EGLD-USD", "FLOW-USD", "MKR-USD", "SAND-USD", "MANA-USD",
+    "XTZ-USD", "VET-USD", "AXS-USD", "EOS-USD", "NEO-USD"
+]
+
+# --- Pengaturan Data di Sidebar (Ubah ke Dropdown Selectbox) ---
+st.sidebar.header("1. Pengaturan Data Crypto")
+
+# Pengguna sekarang memilih lewat dropdown, tidak perlu mengetik lagi
+selected_crypto = st.sidebar.selectbox("Pilih Koin Crypto", CRYPTO_LIST)
+
 selected_start_date = st.sidebar.date_input("Tanggal Mulai", datetime.date(2021, 1, 1))
 selected_end_date = st.sidebar.date_input("Tanggal Akhir", datetime.date.today())
+
 
 if selected_end_date < selected_start_date:
     st.sidebar.error("Kesalahan: Tanggal akhir harus setelah tanggal mulai.")
