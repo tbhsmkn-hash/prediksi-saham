@@ -1,18 +1,18 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
+import numpy as np
 from statsmodels.tsa.arima.model import ARIMA
+from sklearn.svm import SVR
+from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
 import datetime
 
 # --- Pengaturan Halaman Utama ---
-st.title("Aplikasi Prediksi Harga Cryptocurrency-ARIMA")
-st.write("Aplikasi ini melatih model ARIMA secara real-time menggunakan data historis langsung dari Yahoo Finance.")
+st.title("Aplikasi Prediksi Cryptocurrency Berbasis Hybrid ARIMA-SVR")
+st.write("Aplikasi ini mengombinasikan model klasik ARIMA (Linear) dan Machine Learning SVR (Non-Linear) secara real-time.")
 
-# --- Pengaturan Data di Sidebar ---
-st.sidebar.header("1. Pengaturan Data Crypto")
-# Menggunakan ticker Crypto (format yfinance untuk crypto umumnya diakhiri dengan '-USD')
-# --- DAFTAR 50 COIN CRYPTO TERPOPULER (Untuk Dropdown) ---
+# --- DAFTAR 50 COIN CRYPTO TERPOPULER (Untuk Dropdown sesuai struktur awal) ---
 CRYPTO_LIST = [
     "BTC-USD", "ETH-USD", "BNB-USD", "SOL-USD", "XRP-USD", 
     "ADA-USD", "DOGE-USD", "SHIB-USD", "AVAX-USD", "DOT-USD",
@@ -26,25 +26,26 @@ CRYPTO_LIST = [
     "XTZ-USD", "VET-USD", "AXS-USD", "EOS-USD", "NEO-USD"
 ]
 
-# --- Pengaturan Data di Sidebar (Ubah ke Dropdown Selectbox) ---
+# --- Pengaturan Data di Sidebar ---
 st.sidebar.header("1. Pengaturan Data Crypto")
-
-# Pengguna sekarang memilih lewat dropdown, tidak perlu mengetik lagi
 selected_crypto = st.sidebar.selectbox("Pilih Koin Crypto", CRYPTO_LIST)
-
 selected_start_date = st.sidebar.date_input("Tanggal Mulai", datetime.date(2021, 1, 1))
 selected_end_date = st.sidebar.date_input("Tanggal Akhir", datetime.date.today())
-
 
 if selected_end_date < selected_start_date:
     st.sidebar.error("Kesalahan: Tanggal akhir harus setelah tanggal mulai.")
     st.stop()
 
-# --- Pengaturan Parameter ARIMA di Sidebar ---
-st.sidebar.header("2. Parameter Model ARIMA")
+# --- Pengaturan Parameter Model di Sidebar ---
+st.sidebar.header("2. Parameter Model Hybrid")
+st.sidebar.subheader("Parameter ARIMA (Linear)")
 p = st.sidebar.number_input("Orde AR (p)", min_value=0, max_value=5, value=1)
 d = st.sidebar.number_input("Differencing (d)", min_value=0, max_value=2, value=1)
 q = st.sidebar.number_input("Orde MA (q)", min_value=0, max_value=5, value=1)
+
+st.sidebar.subheader("Parameter SVR (Non-Linear)")
+svr_kernel = st.sidebar.selectbox("Kernel SVR", ["rbf", "linear", "poly"])
+svr_c = st.sidebar.number_input("Nilai Regulasi (C)", min_value=0.1, max_value=100.0, value=10.0, step=1.0)
 
 forecast_steps = st.sidebar.slider("Horizon Prediksi (Hari ke Depan)", 1, 30, 7)
 
@@ -55,15 +56,12 @@ def get_crypto_data(ticker, start, end):
     try:
         df = yf.download(ticker, start=start, end=end)
         if not df.empty:
-            # Mengatasi MultiIndex kolom jika terjadi pada library yfinance versi terbaru
             if isinstance(df.columns, pd.MultiIndex):
                 df.columns = df.columns.droplevel(1)
-            
-            # Memastikan index berupa datetime
             df.index = pd.to_datetime(df.index)
         return df
     except Exception as e:
-        st.error(f"Terjadi kesalahan saat mengunduh data dari Yahoo Finance: {e}")
+        st.error(f"Terjadi kesalahan saat mengunduh data: {e}")
         return pd.DataFrame()
 
 # --- Eksekusi Pengambilan Data ---
@@ -75,44 +73,95 @@ df_crypto = get_crypto_data(selected_crypto, start_str, end_str)
 if not df_crypto.empty and 'Close' in df_crypto.columns:
     st.subheader(f"Data Historis Harga {selected_crypto}")
     st.write(df_crypto[['Open', 'High', 'Low', 'Close', 'Volume']].tail()) 
-    
-    # Visualisasi Data Historis
     st.line_chart(df_crypto['Close']) 
     
-    # --- Tombol Eksekusi Model ARIMA ---
-    if st.button("Jalankan Prediksi ARIMA"):
-        with st.spinner(f"Melatih model ARIMA untuk {selected_crypto}..."):
+    # --- Tombol Eksekusi Model Hybrid ---
+    if st.button("Jalankan Prediksi Hybrid ARIMA-SVR"):
+        with st.spinner(f"Melatih model Hybrid untuk {selected_crypto}..."):
             try:
-                # PERBAIKAN UTAMA: Crypto berjalan 24/7. 
-                # Kita gunakan freq='D' (Daily/Kalender murni) dan menghapus dropna/ffill bursa saham.
+                # Memastikan frekuensi data harian penuh (24/7)
                 series_close = df_crypto['Close'].asfreq('D')
-                
-                # Jika ada lubang data langka, tetap diisi agar model tidak patah
                 if series_close.isnull().any():
                     series_close = series_close.ffill()
                 
-                # Memasang dan melatih model ARIMA
-                model = ARIMA(series_close, order=(p, d, q))
-                model_fit = model.fit()
+                # ==========================================
+                # LENGKAH 1: TRAINING MODEL ARIMA (LINEAR)
+                # ==========================================
+                model_arima = ARIMA(series_close, order=(p, d, q))
+                model_arima_fit = model_arima.fit()
                 
-                # 2. Peramalan (Forecast)
-                forecast = model_fit.forecast(steps=forecast_steps)
+                # Mendapatkan nilai fitted values (prediksi data historis oleh ARIMA)
+                arima_fitted = model_arima_fit.fittedvalues
                 
-                # 3. Membuat Indeks Tanggal Hasil Prediksi (Setiap hari berturut-turut tanpa lompat akhir pekan)
+                # Hitung nilai Residual (Error non-linear)
+                residuals = series_close - arima_fitted
+                
+                # ==========================================
+                # LANGKAH 2: TRAINING MODEL SVR (NON-LINEAR)
+                # ==========================================
+                # Menyiapkan fitur lag (misal menggunakan 3 nilai residual terakhir untuk memprediksi residual esok)
+                look_back = 3
+                X_svr, y_svr = [], []
+                res_values = residuals.values
+                
+                for i in range(len(res_values) - look_back):
+                    X_svr.append(res_values[i:(i + look_back)])
+                    y_svr.append(res_values[i + look_back])
+                
+                X_svr, y_svr = np.array(X_svr), np.array(y_svr)
+                
+                # Normalisasi Fitur untuk SVR agar hasil optimal
+                scaler = StandardScaler()
+                X_svr_scaled = scaler.fit_transform(X_svr)
+                
+                # Melatih model SVR
+                model_svr = SVR(kernel=svr_kernel, C=svr_c)
+                model_svr.fit(X_svr_scaled, y_svr)
+                
+                # ==========================================
+                # LANGKAH 3: PROSES PERAMALAN (FORECASTING)
+                # ==========================================
+                # 3a. Peramalan nilai Linear dengan ARIMA
+                arima_forecast = model_arima_fit.forecast(steps=forecast_steps)
+                
+                # 3b. Peramalan nilai Non-Linear dengan SVR secara berantai (Iterative)
+                svr_forecast = []
+                input_res = list(res_values[-look_back:]) # Ambil data residual terakhir
+                
+                for _ in range(forecast_steps):
+                    input_res_scaled = scaler.transform([input_res[-look_back:]])
+                    pred_res = model_svr.predict(input_res_scaled)[0]
+                    svr_forecast.append(pred_res)
+                    input_res.append(pred_res) # Memasukkan hasil prediksi sebagai input berikutnya
+                
+                # 3c. Menggabungkan Hasil Prediksi (ARIMA + SVR)
+                hybrid_forecast = arima_forecast.values + np.array(svr_forecast)
+                
+                # ==========================================
+                # LANGKAH 4: VISUALISASI DAN OUTPUT
+                # ==========================================
+                # Membuat Indeks Tanggal Masa Depan
                 last_date = series_close.index[-1]
                 forecast_index = pd.date_range(start=last_date + pd.Timedelta(days=1), periods=forecast_steps, freq='D')
-                df_forecast = pd.DataFrame({'Prediksi Harga ($)': forecast.values}, index=forecast_index)
+                
+                # Membuat Dataframe Hasil
+                df_forecast = pd.DataFrame({
+                    'Prediksi ARIMA (Linear)': arima_forecast.values,
+                    'Koreksi SVR (Non-Linear)': svr_forecast,
+                    'Total Prediksi Hybrid ($)': hybrid_forecast
+                }, index=forecast_index)
                 df_forecast.index.name = 'Tanggal'
                 
-                # Tampilkan Tabel Hasil Peramalan
-                st.success(f"Proses peramalan selesai untuk {forecast_steps} hari ke depan!")
+                st.success(f"Proses peramalan Hybrid selesai untuk {forecast_steps} hari ke depan!")
                 st.write(df_forecast)
                 
-                # 4. Plot Visualisasi Gabungan
+                # Plot Visualisasi Perbandingan Grafis
                 fig, ax = plt.subplots(figsize=(10, 5))
-                ax.plot(series_close.tail(40), label='Data Historis (40 Hari Terakhir)', color='orange', linewidth=2)
-                ax.plot(df_forecast['Prediksi Harga ($)'], label='Hasil Prediksi ARIMA', color='blue', linestyle='--', marker='o')
-                ax.set_title(f"Grafik Estimasi Tren Harga {selected_crypto}", fontsize=14)
+                ax.plot(series_close.tail(30), label='Data Historis Aktual (30 Hari Terakhir)', color='orange', linewidth=2)
+                ax.plot(df_forecast['Total Prediksi Hybrid ($)'], label='Hasil Akhir Hybrid (ARIMA+SVR)', color='green', linestyle='--', marker='o')
+                ax.plot(df_forecast['Prediksi ARIMA (Linear)'], label='Prediksi Standar ARIMA saja', color='red', linestyle=':', alpha=0.7)
+                
+                ax.set_title(f"Grafik Estimasi Model Hybrid ARIMA-SVR Koin {selected_crypto}", fontsize=14)
                 ax.set_xlabel("Tanggal", fontsize=11)
                 ax.set_ylabel("Harga (USD)", fontsize=11)
                 ax.legend()
@@ -120,6 +169,6 @@ if not df_crypto.empty and 'Close' in df_crypto.columns:
                 st.pyplot(fig)
                 
             except Exception as e:
-                st.error(f"Gagal memproses model ARIMA. Masalah: {e}")
+                st.error(f"Gagal memproses model Hybrid. Detail Masalah: {e}")
 else:
-    st.warning(f"Data untuk simbol '{selected_crypto}' tidak ditemukan. Tip: Gunakan akhiran '-USD' (contoh: BTC-USD, ETH-USD, DOGE-USD).")
+    st.warning(f"Data untuk simbol '{selected_crypto}' gagal dimuat.")
