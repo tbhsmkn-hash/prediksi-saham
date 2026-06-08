@@ -63,14 +63,14 @@ def trigger_google_sheets_sync(ticker_name):
         st.warning(f"Gagal memicu sinkronisasi cloud: {e}")
 
 @st.cache_data(ttl=3600) # Simpan cache selama 1 jam agar tidak berulang kali menembak url cloud
-@st.cache_data(ttl=10) # Perkecil TTL ke 10 detik saat pengujian agar data langsung segar
+#@st.cache_data(ttl=10) # Perkecil TTL ke 10 detik saat pengujian agar data langsung segar
 def get_crypto_data_from_sheets(ticker_name):
     """Membaca data historis dari Google Sheets dengan toleransi Multi-bahasa (ID/EN)."""
     # 1. Picu Web App Apps Script untuk ganti koin di Sheets
     trigger_google_sheets_sync(ticker_name)
     
     # 2. Masukkan URL Publish to Web CSV Anda di sini
-    SHEET_CSV_URL = https://docs.google.com/spreadsheets/d/e/2PACX-1vRLbUkprSxIP60BPBsTGG12NyDaqUEhGWoXER4jKMdETNTAjGUaCv913PQVEgABXf_37hdmU4spLl34/pubhtml"
+    SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRLbUkprSxIP60BPBsTGG12NyDaqUEhGWoXER4jKMdETNTAjGUaCv913PQVEgABXf_37hdmU4spLl34/pub?gid=0&single=true&output=csv"
     
     try:
         df = pd.read_csv(SHEET_CSV_URL)
