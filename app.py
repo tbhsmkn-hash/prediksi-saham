@@ -10,65 +10,70 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import mean_absolute_percentage_error, mean_absolute_error, root_mean_squared_error
 import matplotlib.pyplot as plt
 
-# Konfigurasi Halaman Streamlit
-st.set_page_config(page_title="Prediksi Crypto Hybrid ARIMA-SVR", layout="wide")
+# Konfigurasi Halaman Web App
+st.set_page_config(page_title="Analisis Hybrid ARIMA-SVR Crypto", layout="wide")
 
 # ==========================================
-# 1. FUNGSI PENARIKAN DATA (DENGAN FIX HEADERS)
+# 1. DATA PIPELINE (PERBAIKAN CORE API INDODAX)
 # ==========================================
 
 def get_data_from_indodax(coin_symbol, days_back=365):
-    """Menarik data historis harian langsung dari API Publik Indodax (Rupiah - IDR)"""
+    """Menarik data historis harian dari API Publik Core v2 Indodax (Bebas Blokir)"""
     try:
+        # Konversi waktu ke Unix Timestamp (Detik)
         end_time = int(datetime.datetime.now().timestamp())
         start_time = end_time - (days_back * 24 * 60 * 60)
         
-        url = f"https://indodax.com/tradingview/history?symbol={coin_symbol.lower()}_idr&resolution=D&from={start_time}&to={end_time}"
+        # Format Pair Koin di API v2 Indodax menggunakan huruf kecil (contoh: btc_idr)
+        pair = f"{coin_symbol.lower()}_idr"
         
-        # FIX: Tambahkan User-Agent agar tidak diblokir oleh Cloudflare/Sistem Indodax
+        # Menggunakan Endpoint API v2 resmi khusus Candlestick (Resolusi 1D = 1 Hari = 1440 menit)
+        url = f"https://indodax.com/api/v2/candles/{pair}?res=1440&from={start_time}&to={end_time}"
+        
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
         }
         
         response = requests.get(url, headers=headers, timeout=15)
         
         if response.status_code != 200:
-            st.error(f"Indodax API Return HTTP Status: {response.status_code}")
+            st.error(f"Koneksi Indodax Gagal. Status Code: {response.status_code}")
             return pd.DataFrame()
             
-        json_data = response.json()
+        data_json = response.json()
         
-        if json_data.get('s') == 'ok':
-            df = pd.DataFrame({
-                'Date': pd.to_datetime(json_data['t'], unit='s'),
-                'Open': json_data['o'],
-                'High': json_data['h'],
-                'Low': json_data['l'],
-                'Close': json_data['c'],
-                'Volume': json_data['v']
-            })
+        # API v2 Indodax mengembalikan array of arrays: [timestamp, open, high, low, close, volume]
+        if isinstance(data_json, list) and len(data_json) > 0:
+            df = pd.DataFrame(data_json, columns=['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume'])
+            
+            # Konversi unix timestamp (milidetik jika panjangnya 13 digit, detik jika 10 digit)
+            df['Date'] = pd.to_datetime(df['Timestamp'], unit='s')
             df.set_index('Date', inplace=True)
+            
+            # Drop kolom timestamp mentah dan urutkan tren waktu
+            df.drop('Timestamp', axis=1, inplace=True)
             df.sort_index(inplace=True)
+            
+            # Memastikan seluruh data berupa tipe data numerik mengambang (float)
+            for col in ['Open', 'High', 'Low', 'Close', 'Volume']:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+                
             return df
         else:
-            st.error(f"Indodax API merespons dengan error: {json_data.get('errmsg', 'Unknown')}")
+            st.error("Format respons data dari Indodax tidak sesuai atau kosong.")
             return pd.DataFrame()
+            
     except Exception as e:
-        st.error(f"Gagal memuat data dari Indodax: {e}")
+        st.error(f"Gagal memproses parsing API Indodax: {e}")
         return pd.DataFrame()
 
 def get_data_from_yahoo(ticker_name, days_back=365):
-    """Menarik data historis harian langsung dari Yahoo Finance API (USD)"""
+    """Menarik data historis harian dari Yahoo Finance API (USD)"""
     try:
         hari_ini = datetime.date.today()
         tanggal_mulai = hari_ini - datetime.timedelta(days=days_back)
         
-        df = yf.download(
-            ticker_name, 
-            start=tanggal_mulai.strftime("%Y-%m-%d"), 
-            end=hari_ini.strftime("%Y-%m-%d"),
-            progress=False
-        )
+        df = yf.download(ticker_name, start=tanggal_mulai.strftime("%Y-%m-%d"), end=hari_ini.strftime("%Y-%m-%d"), progress=False)
         
         if not df.empty:
             if isinstance(df.columns, pd.MultiIndex):
@@ -88,14 +93,14 @@ def get_data_from_yahoo(ticker_name, days_back=365):
         return pd.DataFrame()
 
 # ==========================================
-# 2. ANTARMUKA PENGGUNA (SIDEBAR PARAMETER)
+# 2. PANEL SIDERBAR (KONFIGURASI PARAMETER)
 # ==========================================
 
-st.sidebar.title("🛠️ Konfigurasi Sistem")
+st.sidebar.title("⚙️ Panel Konfigurasi")
 
-st.sidebar.subheader("1. Pengaturan Data Source")
+st.sidebar.subheader("1. Pengaturan Sumber Data")
 sumber_data = st.sidebar.selectbox(
-    "Pilih Bursa/Sumber Data:",
+    "Pilih Bursa Acuan:",
     ["Indodax Bursa Indonesia (IDR)", "Yahoo Finance (USD)"]
 )
 
@@ -110,7 +115,7 @@ if sumber_data == "Yahoo Finance (USD)":
 		"THETA-USD", "FTM-USD", "LUNC-USD", "AAVE-USD", "ALGO-USD",
 		"EGLD-USD", "FLOW-USD", "MKR-USD", "SAND-USD", "MANA-USD",
 		"XTZ-USD", "VET-USD", "AXS-USD", "EOS-USD", "NEO-USD"]
-    koin_terpilih = st.sidebar.selectbox("Pilih Koin Crypto:", list_koin)
+    koin_terpilih = st.sidebar.selectbox("Pilih Cryptocurrency:", list_koin)
 else:
     list_koin = ["BTC", "ETH", "BNB", "SOL", "XRP", 
 		"ADA", "DOGE", "SHIB", "AVAX", "DOT",
@@ -122,210 +127,214 @@ else:
 		"THETA", "FTM", "LUNC", "AAVE", "ALGO",
 		"EGLD", "FLOW", "MKR", "SAND", "MANA",
 		"XTZ", "VET", "AXS", "EOS", "NEO"]
-    koin_terpilih = st.sidebar.selectbox("Pihal Koin Crypto (Pair IDR):", list_koin)
+    koin_terpilih = st.sidebar.selectbox("Pilih Cryptocurrency (Pair IDR):", list_koin)
 
-rentang_hari = st.sidebar.slider("Rentang Data Historis (Hari Ke Belakang):", 180, 730, 365)
+rentang_hari = st.sidebar.slider("Rentang Pengambilan Data (Hari):", 180, 730, 365)
 
-st.sidebar.subheader("2. Parameter Model ARIMA")
-p = st.sidebar.number_input("Orde AR (p):", min_value=0, max_value=5, value=1)
-d = st.sidebar.number_input("Differencing (d):", min_value=0, max_value=2, value=1)
-q = st.sidebar.number_input("Orde MA (q):", min_value=0, max_value=5, value=1)
+st.sidebar.subheader("2. Komponen Linier (ARIMA)")
+p = st.sidebar.number_input("Orde Autoregressive (p):", min_value=0, max_value=5, value=1)
+d = st.sidebar.number_input("Orde Differencing (d):", min_value=0, max_value=2, value=1)
+q = st.sidebar.number_input("Orde Moving Average (q):", min_value=0, max_value=5, value=1)
 
-st.sidebar.subheader("3. Parameter Model SVR")
-kernel = st.sidebar.selectbox("Kernel SVR:", ["rbf", "linear", "poly"])
-c_param = st.sidebar.number_input("Regularisasi C:", min_value=1.0, max_value=1000.0, value=100.0)
-gamma = st.sidebar.selectbox("Gamma SVR:", ["scale", "auto"])
+st.sidebar.subheader("3. Komponen Non-Linier Residu (SVR)")
+kernel = st.sidebar.selectbox("Fungsi Kernel SVR:", ["rbf", "linear", "poly"])
+c_param = st.sidebar.number_input("Parameter Regularisasi C:", min_value=1.0, max_value=2000.0, value=100.0, step=50.0)
+gamma = st.sidebar.selectbox("Parameter Gamma SVR:", ["scale", "auto"])
 
-st.sidebar.subheader("4. Proyeksi Masa Depan")
-hari_prediksi = st.sidebar.slider("Jumlah Hari ke Depan:", 1, 30, 7)
+st.sidebar.subheader("4. Pengaturan Proyeksi")
+hari_prediksi = st.sidebar.slider("Durasi Peramalan Ke Depan (Hari):", 1, 30, 7)
 
 # ==========================================
-# 3. MAIN PAGE / HALAMAN UTAMA
+# 3. HALAMAN DASHBOARD UTAMA
 # ==========================================
 
-st.title("📊 Sistem Analisis & Prediksi Cryptocurrency")
-st.markdown("Integrasi Model Linier **ARIMA** dan Machine Learning **SVR (Support Vector Regression)** untuk koreksi residu volatil.")
+st.title("📈 Sistem Komputasi Cerdas Hybrid ARIMA-SVR")
+st.markdown("Aplikasi Analitik Peramalan Harga Cryptocurrency Menggunakan SVR Untuk Pemodelan Galat/Residu Hasil Proyeksi ARIMA.")
 
-# Ambil data secara otomatis saat koin/bursa berubah
-if sumber_data == "Yahoo Finance (USD)":
-    df_crypto = get_data_from_yahoo(koin_terpilih, days_back=rentang_hari)
-    mata_uang = "USD"
-else:
-    df_crypto = get_data_from_indodax(koin_terpilih, days_back=rentang_hari)
-    mata_uang = "IDR"
+# Memulai Alur Penarikan Data Otomatis Berdasarkan Input Bursa
+with st.spinner("Menghubungkan ke API Bursa untuk menyinkronkan data..."):
+    if sumber_data == "Yahoo Finance (USD)":
+        df_crypto = get_data_from_yahoo(koin_terpilih, days_back=rentang_hari)
+        mata_uang = "USD"
+    else:
+        df_crypto = get_data_from_indodax(koin_terpilih, days_back=rentang_hari)
+        mata_uang = "IDR"
 
+# Cek Apakah Pipeline Berhasil Mengisi Dataframe
 if not df_crypto.empty:
-    # ------------------------------------------
-    # TAMPILKAN 10 DATA TERBARU & TOMBOL UNDUH
-    # ------------------------------------------
-    st.subheader(f"📋 10 Data Historis Terbaru ({koin_terpilih} - {mata_uang})")
-    st.dataframe(df_crypto.tail(10))
     
-    # Fitur Download Dataset Aktual
-    csv_data = df_crypto.to_csv().encode('utf-8')
-    st.download_button(
-        label="📥 Unduh Dataset Aktual (CSV)",
-        data=csv_data,
-        file_name=f"data_aktual_{koin_terpilih}_{datetime.date.today()}.csv",
-        mime="text/csv"
-    )
-    
-    # ------------------------------------------
-    # ANALISIS STATISTIK DESKRIPTIF (Statistical Analysis)
-    # ------------------------------------------
-    st.subheader("📉 Analisis Statistik Deskriptif Dataset")
-    col_stat1, col_stat2 = st.columns([2, 1])
-    with col_stat1:
-        st.dataframe(df_crypto.describe().T)
-    with col_stat2:
-        st.info(
-            f"**Informasi Dataset:**\n\n"
-            f"- Tanggal Mulai: {df_crypto.index.min().strftime('%Y-%m-%d')}\n"
-            f"- Tanggal Akhir: {df_crypto.index.max().strftime('%Y-%m-%d')}\n"
-            f"- Total Sampel: {len(df_crypto)} Hari"
+    # --- BAGIAN A: EKSPLORASI DATASET HISTORIS ---
+    col_tabel, col_unduh = st.columns([3, 1])
+    with col_tabel:
+        st.subheader(f"📋 10 Data Historis Transaksi Terbaru ({koin_terpilih})")
+        st.dataframe(df_crypto.tail(10))
+    with col_unduh:
+        st.markdown("<br><br>", unsafe_transform=True)
+        # Tombol Unduh Eksport Data CSV
+        csv_buffer = df_crypto.to_csv().encode('utf-8')
+        st.download_button(
+            label="📥 Unduh File Dataset (.CSV)",
+            data=csv_buffer,
+            file_name=f"dataset_{koin_terpilih}_{datetime.date.today()}.csv",
+            mime="text/csv",
+            use_container_width=True
         )
 
-    # ------------------------------------------
-    # TOMBOL PROSES PREDIKSI & PEMODELAN HYBRID
-    # ------------------------------------------
+    # --- BAGIAN B: ANALISIS STATISTIK (Statistical Analysis) ---
+    st.subheader("📊 Analisis Statistik Deskriptif Pasar")
+    col_stat_tabel, col_stat_info = st.columns([2, 1])
+    with col_stat_tabel:
+        st.dataframe(df_crypto.describe().T)
+    with col_stat_info:
+        st.markdown(
+            f"<div style='padding:15px; border-radius:10px; background-color:#f0f2f6; color:black'>"
+            f"<b>Metadata Log Jaringan:</b><br>"
+            f"• Rentang Awal: {df_crypto.index.min().strftime('%d %B %Y')}<br>"
+            f"• Rentang Akhir: {df_crypto.index.max().strftime('%d %B %Y')}<br>"
+            f"• Total Data Observasi: {len(df_crypto)} Hari Aktual"
+            f"</div>", 
+            unsafe_allow_html=True
+        )
+
+    # --- BAGIAN C: PENGKONDISIAN TOMBOL EKSEKUSI PREDIKSI ---
     st.markdown("---")
-    st.subheader("🔮 Pemodelan Komputasi Hybrid")
-    st.info("Klik tombol di bawah ini untuk memulai proses pelatihan data menggunakan ARIMA, SVR, dan metode penggabungan Hybrid.")
+    st.subheader("⚡ Pemrosesan Algoritma Machine Learning")
+    st.warning("Sesuaikan parameter matriks di sidebar kiri terlebih dahulu. Klik tombol di bawah ini untuk memulai pelatihan model.")
     
-    if st.button("🚀 Jalankan Analisis & Prediksi Model", type="primary"):
+    # Pemicu Pemodelan Matematika
+    if st.button("🚀 Jalankan Analisis & Prediksi Model", type="primary", use_container_width=True):
         try:
+            # Isolasi Target Variabel (Harga Penutupan / Close)
             data_close = df_crypto['Close'].astype(float)
             
-            # 1. PROSES MODEL ARIMA
+            # 1. TAHAP LINIER: EKSEKUSI MODEL ARIMA MURNI
             model_arima = ARIMA(data_close, order=(p, d, q))
             model_arima_fitted = model_arima.fit()
-            prediksi_arima = model_arima_fitted.fittedvalues
-            residu_arima = data_close - prediksi_arima
+            prediksi_arima_murni = model_arima_fitted.fittedvalues
             
-            # 2. PROSES MODEL SVR (Berdasarkan Lag Residu ARIMA)
-            df_residu = pd.DataFrame({'Residu': residu_arima})
-            df_residu['Lag_1'] = df_residu['Residu'].shift(1)
-            df_residu.dropna(inplace=True)
+            # Hitung Nilai Galat / Residu Linier
+            residu_galat_arima = data_close - prediksi_arima_murni
             
-            X_svr = df_residu[['Lag_1']].values
-            y_svr = df_residu['Residu'].values
+            # 2. TAHAP NON-LINIER: TRAINING SVR BERDASARKAN LAG RESIDU
+            df_residu_lag = pd.DataFrame({'Residu': residu_galat_arima})
+            df_residu_lag['Lag_1'] = df_residu_lag['Residu'].shift(1)
+            df_residu_lag.dropna(inplace=True)
             
-            scaler = MinMaxScaler(feature_range=(-1, 1))
-            X_svr_scaled = scaler.fit_transform(X_svr)
+            X_svr = df_residu_lag[['Lag_1']].values
+            y_svr = df_residu_lag['Residu'].values
+            
+            # Skalasi Fitur Residu agar optimal pada Struktur Fungsi Kernel SVR
+            scaler_input = MinMaxScaler(feature_range=(-1, 1))
+            X_svr_scaled = scaler_input.fit_transform(X_svr)
             
             model_svr = SVR(kernel=kernel, C=c_param, gamma=gamma)
             model_svr.fit(X_svr_scaled, y_svr)
             prediksi_residu_svr = model_svr.predict(X_svr_scaled)
             
-            # 3. SINKRONISASI DATAFRAME EVALUASI (Bypass Indeks Pertama karena Lag)
-            data_aktual_eval = data_close.iloc[1:]
-            prediksi_arima_eval = prediksi_arima.iloc[1:]
+            # 3. SINKRONISASI INDEKS BARIS EVALUASI (Bypass Baris Pertama karena Lag Efek)
+            data_aktual_sinkron = data_close.iloc[1:]
+            prediksi_arima_sinkron = prediksi_arima_murni.iloc[1:]
             
-            # Rekonstruksi hasil akhir SVR murni pada harga asli
-            prediksi_svr_eval = prediksi_arima_eval + prediksi_residu_svr 
-            hasil_hybrid_eval = prediksi_arima_eval + prediksi_residu_svr
+            # Nilai Prediksi Akhir Gabungan Hybrid
+            hasil_prediksi_hybrid = prediksi_arima_sinkron + prediksi_residu_svr
             
-            # ------------------------------------------
-            # PERHITUNGAN TABEL PERBANDINGAN ERROR (RMSE, MAE, MAPE)
-            # ------------------------------------------
-            st.subheader("📊 Tabel Perbandingan Nilai Eror Model")
+            # Rekonstruksi Nilai SVR Murni ke Skala Harga Aktual (Sebagai Pembanding Independen)
+            hasil_prediksi_svr_only = data_close.shift(1).iloc[1:] + prediksi_residu_svr
+
+            # --- BAGIAN D: TABEL KOMPARASI EVALUASI ERROR ---
+            st.subheader("📉 Tabel Perbandingan Tingkat Kesalahan (Error Evaluation)")
             
-            metrics_dict = {
-                "Model Pemodelan": ["ARIMA Murni (Linear)", "SVR Murni (Koreksi Residu)", "Hybrid ARIMA-SVR"],
+            df_evaluasi_error = pd.DataFrame({
+                "Nama Model Analitis": ["ARIMA Murni (Linear Model)", "SVR Murni (Non-Linear Residu)", "Kombinasi Hybrid (ARIMA-SVR)"],
                 "RMSE": [
-                    root_mean_squared_error(data_aktual_eval, prediksi_arima_eval),
-                    root_mean_squared_error(data_aktual_eval, prediksi_svr_eval),
-                    root_mean_squared_error(data_aktual_eval, hasil_hybrid_eval)
+                    root_mean_squared_error(data_aktual_sinkron, prediksi_arima_sinkron),
+                    root_mean_squared_error(data_aktual_sinkron, hasil_prediksi_svr_only),
+                    root_mean_squared_error(data_aktual_sinkron, hasil_prediksi_hybrid)
                 ],
                 "MAE": [
-                    mean_absolute_error(data_aktual_eval, prediksi_arima_eval),
-                    mean_absolute_error(data_aktual_eval, prediksi_svr_eval),
-                    mean_absolute_error(data_aktual_eval, hasil_hybrid_eval)
+                    mean_absolute_error(data_aktual_sinkron, prediksi_arima_sinkron),
+                    mean_absolute_error(data_aktual_sinkron, hasil_prediksi_svr_only),
+                    mean_absolute_error(data_aktual_sinkron, hasil_prediksi_hybrid)
                 ],
                 "MAPE (%)": [
-                    mean_absolute_percentage_error(data_aktual_eval, prediksi_arima_eval) * 100,
-                    mean_absolute_percentage_error(data_aktual_eval, prediksi_svr_eval) * 100,
-                    mean_absolute_percentage_error(data_aktual_eval, hasil_hybrid_eval) * 100
+                    mean_absolute_percentage_error(data_aktual_sinkron, prediksi_arima_sinkron) * 100,
+                    mean_absolute_percentage_error(data_aktual_sinkron, hasil_prediksi_svr_only) * 100,
+                    mean_absolute_percentage_error(data_aktual_sinkron, hasil_prediksi_hybrid) * 100
                 ]
-            }
+            })
+            st.table(df_evaluasi_error)
             
-            df_metrics = pd.DataFrame(metrics_dict)
-            st.table(df_metrics)
+            # --- BAGIAN E: VISUALISASI HISTORIS (Visualization) ---
+            st.subheader("📊 Visualisasi Hasil Fitting Model")
             
-            # ------------------------------------------
-            # VISUALISASI MODEL COMPARISON
-            # ------------------------------------------
-            st.subheader("📈 Visualisasi Hasil Prediksi Data Historis")
+            fig_hist, ax_hist = plt.subplots(figsize=(15, 6))
+            ax_hist.plot(data_close.index, data_close.values, label="Harga Aktual Pasar", color="teal", linewidth=2.5)
+            ax_hist.plot(prediksi_arima_sinkron.index, prediksi_arima_sinkron.values, label="Estimasi ARIMA", color="orange", linestyle="--", alpha=0.8)
+            ax_hist.plot(data_aktual_sinkron.index, hasil_prediksi_hybrid, label="Estimasi Hybrid (ARIMA-SVR)", color="purple", linewidth=2)
             
-            fig, ax = plt.subplots(figsize=(14, 6))
-            ax.plot(data_close.index, data_close.values, label="Harga Aktual Pasar", color="black", linewidth=2)
-            ax.plot(prediksi_arima_eval.index, prediksi_arima_eval.values, label="Prediksi ARIMA", color="orange", linestyle="--", alpha=0.8)
-            ax.plot(data_aktual_eval.index, hasil_hybrid_eval, label="Prediksi Hybrid ARIMA-SVR", color="crimson", linewidth=2)
+            ax_hist.set_title(f"Grafik Perbandingan Pergerakan Harga Aktual vs Hasil Estimasi Model ({koin_terpilih})", fontsize=13)
+            ax_hist.set_xlabel("Garis Waktu (Tanggal)", fontsize=11)
+            ax_hist.set_ylabel(f"Nilai Aset ({mata_uang})", fontsize=11)
+            ax_hist.grid(True, linestyle=":", alpha=0.5)
+            ax_hist.legend(loc="upper left")
             
-            ax.set_title(f"Komparasi Pergerakan Harga Aktual vs Model Estimasi ({koin_terpilih})", fontsize=14)
-            ax.set_xlabel("Tanggal", fontsize=12)
-            ax.set_ylabel(f"Harga ({mata_uang})", fontsize=12)
-            ax.grid(True, linestyle=":", alpha=0.5)
-            ax.legend(loc="upper left")
-            
+            # Formatting bilangan ribuan untuk Rupiah
             if mata_uang == "IDR":
-                ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:,}".format(int(x))))
+                ax_hist.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:,}".format(int(x))))
                 
-            st.pyplot(fig)
+            st.pyplot(fig_hist)
             
-            # ------------------------------------------
-            # PROYEKSI PREDIKSI MASA DEPAN
-            # ------------------------------------------
+            # --- BAGIAN F: PROYEKSI NILAI MASA DEPAN ---
             st.markdown("---")
-            st.subheader(f"🔮 Hasil Proyeksi Nilai Masa Depan ({hari_prediksi} Hari Kedepan)")
+            st.subheader(f"🔮 Hasil Peramalan Tren Masa Depan ({hari_prediksi} Hari Ke Depan)")
             
-            # Forecasting Masa Depan ARIMA
-            forecast_arima_raw = model_arima_fitted.forecast(steps=hari_prediksi)
+            # Peramalan Masa Depan Menggunakan Koefisien ARIMA
+            proyeksi_raw_arima = model_arima_fitted.forecast(steps=hari_prediksi)
             
-            # Forecasting Masa Depan Residu SVR secara Autoregresif
+            # Peramalan Autoregresif Masa Depan Menggunakan Bobot SVR
             residu_terakhir = y_svr[-1]
-            forecast_residu_svr_list = []
+            list_proyeksi_residu_svr = []
             
             for _ in range(hari_prediksi):
-                scaled_lag = scaler.transform([[residu_terakhir]])
-                pred_residu = model_svr.predict(scaled_lag)[0]
-                forecast_residu_svr_list.append(pred_residu)
-                residu_terakhir = pred_residu
+                scaled_lag_input = scaler_input.transform([[residu_terakhir]])
+                output_pred_residu = model_svr.predict(scaled_lag_input)[0]
+                list_proyeksi_residu_svr.append(output_pred_residu)
+                residu_terakhir = output_pred_residu # Update data lag input dengan prediksi terakhir
                 
-            # Kombinasikan Proyeksi Masa Depan
-            proyeksi_hybrid_final = forecast_arima_raw + np.array(forecast_residu_svr_list)
+            # Akumulasikan Nilai Komponen Proyeksi
+            nilai_akhir_proyeksi_hybrid = proyeksi_raw_arima.values + np.array(list_proyeksi_residu_svr)
             
-            # Membuat Indeks Tanggal Masa Depan
-            tanggal_akhir_pasar = data_close.index[-1]
-            indeks_masa_depan = pd.date_range(start=tanggal_akhir_pasar + datetime.timedelta(days=1), periods=hari_prediksi)
+            # Menentukan Penanggalan Indeks Masa Depan
+            tanggal_paling_akhir = data_close.index[-1]
+            indeks_tanggal_proyeksi = pd.date_range(start=tanggal_paling_akhir + datetime.timedelta(days=1), periods=hari_prediksi)
             
-            # Dataframe Hasil Prediksi
-            df_proyeksi_tabel = pd.DataFrame({
-                "Proyeksi Nilai ARIMA Murni": forecast_arima_raw.values,
-                "Koreksi Residu SVR": forecast_residu_svr_list,
-                f"Hasil Akhir Hybrid ({mata_uang})": proyeksi_hybrid_final
-            }, index=indeks_masa_depan)
-            df_proyeksi_tabel.index.name = "Tanggal Proyeksi"
+            # Konstruksi ke dalam Dataframe Penampil
+            df_output_ramalan = pd.DataFrame({
+                "Proyeksi ARIMA (Linier)": proyeksi_raw_arima.values,
+                "Koreksi Residu SVR": list_proyeksi_residu_svr,
+                f"Hasil Akhir Hybrid ({mata_uang})": nilai_akhir_proyeksi_hybrid
+            }, index=indeks_tanggal_proyeksi)
+            df_output_ramalan.index.name = "Tanggal Proyeksi"
             
-            # Tampilkan Komparasi Output Prediksi dalam Bentuk Kolom (Tabel & Grafik)
-            col_res1, col_res2 = st.columns([1, 1])
-            with col_res1:
-                st.markdown("**Tabel Rincian Angka Prediksi:**")
-                st.dataframe(df_proyeksi_tabel)
-            with col_res2:
+            # Pemisahan Output Proyeksi ke Dalam Dua Kolom Visual
+            col_res_tabel, col_res_grafik = st.columns([1, 1])
+            with col_res_tabel:
+                st.markdown("**Tabel Angka Rincian Proyeksi Masa Depan:**")
+                st.dataframe(df_output_ramalan)
+            with col_res_grafik:
                 st.markdown("**Grafik Tren Proyeksi Masa Depan:**")
                 fig_f, ax_f = plt.subplots(figsize=(10, 5))
-                ax_f.plot(df_proyeksi_tabel.index, df_proyeksi_tabel[f"Hasil Akhir Hybrid ({mata_uang})"], marker='o', color='crimson', label='Proyeksi Hybrid')
-                ax_f.plot(df_proyeksi_tabel.index, df_proyeksi_tabel["Proyeksi Nilai ARIMA Murni"], marker='x', linestyle='--', color='orange', label='Proyeksi ARIMA')
+                ax_f.plot(df_output_ramalan.index, df_output_ramalan[f"Hasil Akhir Hybrid ({mata_uang})"], marker='o', linewidth=2, color='purple', label='Proyeksi Hybrid')
+                ax_f.plot(df_output_ramalan.index, df_output_ramalan["Proyeksi ARIMA (Linier)"], marker='x', linestyle='--', color='orange', label='Proyeksi ARIMA')
                 ax_f.set_ylabel(f"Harga ({mata_uang})")
                 ax_f.grid(True, linestyle=":", alpha=0.5)
                 ax_f.legend()
                 plt.xticks(rotation=45)
                 st.pyplot(fig_f)
                 
-        except Exception as math_err:
-            st.error(f"Gagal memproses perhitungan model: {math_err}")
-            st.info("Saran: Sesuaikan kembali nilai parameter ordo p, d, q ARIMA pada sidebar agar data mencapai titik stasioner yang ideal.")
+        except Exception as err:
+            st.error(f"Gagal melakukan komputasi numerik model: {err}")
+            st.info("Catatan: Terjadinya eror matematika matriks biasanya dipicu oleh ordo differencing (d) atau parameter ARIMA yang tidak stasioner dengan sebaran data. Sila ubah nilai parameter p, d, q pada sidebar.")
             
 else:
-    st.warning("Saluran data kosong. Silakan periksa kembali koneksi jaringan atau ganti opsi bursa pilihan Anda.")
+    st.warning("Saluran data bursa kosong atau tidak merespons secara tepat. Silakan pilih opsi bursa penopang lainnya.")
