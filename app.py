@@ -3,117 +3,63 @@ import pandas as pd
 import numpy as np
 import requests
 import datetime
-import yfinance as yf
 from statsmodels.tsa.arima.model import ARIMA
 from sklearn.svm import SVR
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import mean_absolute_percentage_error, mean_absolute_error, root_mean_squared_error
 import matplotlib.pyplot as plt
 
-# Konfigurasi Dasar Tampilan Web App
-st.set_page_config(page_title="Sistem Hybrid ARIMA-SVR Cryptocurrency", layout="wide")
+# Konfigurasi Tampilan Web App
+st.set_page_config(page_title="Sistem Hybrid ARIMA-SVR Indodax v2", layout="wide")
 
 # ==========================================
-# 1. PIPELINE DATA (ANTI-BLOKIR CLOUDFLARE INDODAX)
+# 1. PIPELINE DATA CORE API V2 RESMI INDODAX (BEBAS BLOKIR)
 # ==========================================
 
 def get_data_from_indodax(coin_symbol, days_back=365):
-    """Menarik data historis dengan simulasi Session TLS Browser penuh agar lolos Cloudflare"""
+    """Menarik data historis harian murni menggunakan API Core V2 Resmi Indodax"""
     try:
         end_time = int(datetime.datetime.now().timestamp())
         start_time = end_time - (days_back * 24 * 60 * 60)
         
-        pair_ticker = f"{coin_symbol.upper()}_IDR"
-        url = f"https://indodax.com/tradingview/history?symbol={pair_ticker}&resolution=D&from={start_time}&to={end_time}"
+        # API V2 menggunakan huruf kecil dan underscore (Contoh: btc_idr)
+        pair_ticker = f"{coin_symbol.lower()}_idr"
         
-        # Membuat session HTTP untuk mempertahankan cookie/handshake layaknya browser asli
-        session = requests.Session()
+        # Endpoint Publik V2 Resmi untuk Candlestick harian (1 Hari = 1440 menit)
+        url = f"https://indodax.com/api/v2/candles/{pair_ticker}?res=1440&from={start_time}&to={end_time}"
         
         headers = {
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-            "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7",
-            "Cache-Control": "max-age=0",
-            "Sec-Ch-Ua": '"Not-A.Brand";v="99", "Chromium";v="124", "Google Chrome";v="124"',
-            "Sec-Ch-Ua-Mobile": "?0",
-            "Sec-Ch-Ua-Platform": '"macOS"',
-            "Sec-Fetch-Dest": "document",
-            "Sec-Fetch-Mode": "navigate",
-            "Sec-Fetch-Site": "none",
-            "Sec-Fetch-User": "?1",
-            "Upgrade-Insecure-Requests": "1"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
         }
         
-        response = session.get(url, headers=headers, timeout=15)
+        response = requests.get(url, headers=headers, timeout=15)
         
-        # JIKA TETAP DIBLOKIR CLOUDFLARE (Mengembalikan HTML, bukan JSON)
-        if response.text.strip().startswith("<!DOCTYPE html>"):
-            st.warning("⚠️ Server Indodax mendeteksi skrip Cloud. Mengaktifkan Jalur Cadangan Konversi Kurs Yahoo Finance...")
-            # JALUR CADANGAN: Ambil data dari Yahoo Finance (USD) lalu konversi ke IDR secara otomatis
-            df_usd = get_data_from_yahoo(f"{coin_symbol.upper()}-USD", days_back)
-            if not df_usd.empty:
-                # Ambil kurs USD ke IDR terbaru (Default: Rp 16.000 jika API Kurs lambat)
-                kurs_usd_idr = 16200.0
-                try:
-                    forex_data = yf.download("IDR=X", period="1d", progress=False)
-                    if not forex_data.empty:
-                        kurs_usd_idr = float(forex_data['Close'].iloc[-1])
-                except:
-                    pass
-                
-                # Konversi seluruh kolom ke Rupiah
-                for col in ['Open', 'High', 'Low', 'Close']:
-                    df_usd[col] = df_usd[col] * kurs_usd_idr
-                return df_usd
+        if response.status_code != 200:
+            st.error(f"Gagal terhubung ke server Indodax. HTTP Status: {response.status_code}")
             return pd.DataFrame()
             
         json_data = response.json()
         
-        if json_data.get('s') == 'ok' or 't' in json_data:
-            df = pd.DataFrame({
-                'Date': pd.to_datetime(json_data['t'], unit='s'),
-                'Open': json_data['o'],
-                'High': json_data['h'],
-                'Low': json_data['l'],
-                'Close': json_data['c'],
-                'Volume': json_data['v']
-            })
+        # API V2 mengembalikan array di dalam array secara langsung: [[timestamp, open, high, low, close, volume], ...]
+        if isinstance(json_data, list) and len(json_data) > 0:
+            df = pd.DataFrame(json_data, columns=['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume'])
+            
+            # Konversi timestamp detik ke format datetime
+            df['Date'] = pd.to_datetime(df['Timestamp'], unit='s')
             df.set_index('Date', inplace=True)
+            df.drop('Timestamp', axis=1, inplace=True)
             df.sort_index(inplace=True)
             
+            # Memastikan seluruh data numerik berupa float
             for col in ['Open', 'High', 'Low', 'Close', 'Volume']:
                 df[col] = pd.to_numeric(df[col], errors='coerce')
             return df
         else:
+            st.error(f"API Indodax merespons kosong. Format data tidak sesuai untuk pair {pair_ticker}.")
             return pd.DataFrame()
             
     except Exception as e:
-        st.error(f"Gagal melakukan pembacaan struktur API Indodax: {e}")
-        return pd.DataFrame()
-
-def get_data_from_yahoo(ticker_name, days_back=365):
-    """Menarik data historis harian dari Yahoo Finance API (USD)"""
-    try:
-        hari_ini = datetime.date.today()
-        tanggal_mulai = hari_ini - datetime.timedelta(days=days_back)
-        
-        df = yf.download(ticker_name, start=tanggal_mulai.strftime("%Y-%m-%d"), end=hari_ini.strftime("%Y-%m-%d"), progress=False)
-        
-        if not df.empty:
-            if isinstance(df.columns, pd.MultiIndex):
-                df.columns = df.columns.droplevel(1)
-                
-            df.index = pd.to_datetime(df.index)
-            df.index.name = 'Date'
-            df.sort_index(inplace=True)
-            
-            for col in ['Open', 'High', 'Low', 'Close', 'Volume']:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
-            return df
-        else:
-            return pd.DataFrame()
-    except Exception as e:
-        st.error(f"Gagal memuat data dari Yahoo Finance: {e}")
+        st.error(f"Gagal memproses struktur data API Indodax V2: {e}")
         return pd.DataFrame()
 
 # ==========================================
@@ -123,24 +69,6 @@ def get_data_from_yahoo(ticker_name, days_back=365):
 st.sidebar.title("⚙️ Pengaturan Parameter")
 
 st.sidebar.subheader("1. Sumber Data Pasar")
-sumber_data = st.sidebar.selectbox(
-    "Pilih Bursa Acuan:",
-    ["Indodax Bursa Indonesia (IDR)", "Yahoo Finance (USD)"]
-)
-
-if sumber_data == "Yahoo Finance (USD)":
-    list_koin = ["BTC-USD", "ETH-USD", "BNB-USD", "SOL-USD", "XRP-USD", 
-		"ADA-USD", "DOGE-USD", "SHIB-USD", "AVAX-USD", "DOT-USD",
-		"MATIC-USD", "LINK-USD", "TRX-USD", "UNI-USD", "ICP-USD",
-		"BCH-USD", "NEAR-USD", "FIL-USD", "LTC-USD", "LEO-USD",
-		"ETC-USD", "APT-USD", "ATOM-USD", "XLM-USD", "HBAR-USD",
-		"IMX-USD", "GRT-USD", "STX-USD", "KAS-USD", "TON-USD",
-		"PEPE-USD", "WIF-USD", "FLOKI-USD", "RUNE-USD", "RENDER-USD",
-		"THETA-USD", "FTM-USD", "LUNC-USD", "AAVE-USD", "ALGO-USD",
-		"EGLD-USD", "FLOW-USD", "MKR-USD", "SAND-USD", "MANA-USD",
-		"XTZ-USD", "VET-USD", "AXS-USD", "EOS-USD", "NEO-USD"]
-    koin_terpilih = st.sidebar.selectbox("Pilih Cryptocurrency:", list_koin)
-else:
     list_koin = ["BTC", "ETH", "BNB", "SOL", "XRP", 
 		"ADA", "DOGE", "SHIB", "AVAX", "DOT",
 		"MATIC", "LINK", "TRX", "UNI", "ICP",
@@ -151,7 +79,7 @@ else:
 		"THETA", "FTM", "LUNC", "AAVE", "ALGO",
 		"EGLD", "FLOW", "MKR", "SAND", "MANA",
 		"XTZ", "VET", "AXS", "EOS", "NEO"]
-    koin_terpilih = st.sidebar.selectbox("Pilih Koin Kripto (Pair IDR):", list_koin)
+    koin_terpilih = st.sidebar.selectbox("Pilih Koin Kripto (Pair IDR Resmi Indodax):", list_koin)
 
 rentang_hari = st.sidebar.slider("Rentang Data Historis (Hari):", 180, 730, 365)
 
@@ -172,24 +100,20 @@ hari_prediksi = st.sidebar.slider("Durasi Peramalan Ke Depan (Hari):", 1, 30, 7)
 # 3. AREA DASHBOARD HALAMAN UTAMA
 # ==========================================
 
-st.title("📊 Platform Komputasi Cerdas Hybrid ARIMA-SVR")
-st.markdown("Aplikasi analisis integrasi regresi klasik linier **ARIMA** dengan optimasi pola non-linier residu menggunakan **SVR**.")
+st.title("📊 Platform Komputasi Cerdas Hybrid ARIMA-SVR (Indodax API V2)")
+st.markdown(f"Analisis integrasi regresi klasik linier **ARIMA** dengan optimasi pola non-linier residu menggunakan **SVR** menggunakan data riil **PT. Indodax Nasional Indonesia**.")
 
-# Eksekusi fungsi penarikan data secara real-time
-with st.spinner("Memuat data transaksi dari server bursa..."):
-    if sumber_data == "Yahoo Finance (USD)":
-        df_crypto = get_data_from_yahoo(koin_terpilih, days_back=rentang_hari)
-        mata_uang = "USD"
-    else:
-        df_crypto = get_data_from_indodax(koin_terpilih, days_back=rentang_hari)
-        mata_uang = "IDR"
+# Eksekusi penarikan data secara langsung dari API Core V2 Indodax
+with st.spinner("Mengunduh data transaksi harian langsung dari core server Indodax..."):
+    df_crypto = get_data_from_indodax(koin_terpilih, days_back=rentang_hari)
+    mata_uang = "IDR"
 
 if not df_crypto.empty:
     
     # --- BAGIAN A: EKSPLORASI DATA TERBARU & TOMBOL DOWNLOAD ---
     col_tabel, col_unduh = st.columns([3, 1])
     with col_tabel:
-        st.subheader(f"📋 10 Baris Data Transaksi Terakhir ({koin_terpilih})")
+        st.subheader(f"📋 10 Baris Data Transaksi Terakhir Rupiah ({koin_terpilih}/IDR)")
         st.dataframe(df_crypto.tail(10))
     with col_unduh:
         st.markdown("<br><br>", unsafe_allow_html=True)
@@ -197,20 +121,20 @@ if not df_crypto.empty:
         st.download_button(
             label="📥 Unduh File Dataset (.CSV)",
             data=csv_buffer,
-            file_name=f"dataset_aktual_{koin_terpilih}_{datetime.date.today()}.csv",
+            file_name=f"dataset_indodax_{koin_terpilih}_{datetime.date.today()}.csv",
             mime="text/csv",
             use_container_width=True
         )
 
     # --- BAGIAN B: ANALISIS STATISTIK DESKRIPTIF ---
-    st.subheader("📊 Analisis Statistik Deskriptif Variabel")
+    st.subheader("📊 Analisis Statistik Deskriptif Nilai Rupiah")
     col_stat_df, col_stat_box = st.columns([2, 1])
     with col_stat_df:
         st.dataframe(df_crypto.describe().T)
     with col_stat_box:
         st.markdown(
             f"<div style='padding:15px; border-radius:10px; background-color:#1e293b; color:white'>"
-            f"<b>Metadata Observasi:</b><br>"
+            f"<b>Metadata Observasi Indodax:</b><br>"
             f"• Titik Awal Tren: {df_crypto.index.min().strftime('%d-%m-%Y')}<br>"
             f"• Titik Akhir Tren: {df_crypto.index.max().strftime('%d-%m-%Y')}<br>"
             f"• Jumlah Sampel: {len(df_crypto)} Hari Efektif"
@@ -282,19 +206,17 @@ if not df_crypto.empty:
             st.subheader("📊 Visualisasi Hasil Fitting Nilai Historis")
             
             fig_hist, ax_hist = plt.subplots(figsize=(15, 6))
-            ax_hist.plot(data_close.index, data_close.values, label="Harga Pasar Aktual", color="darkcyan", linewidth=2.5)
+            ax_hist.plot(data_close.index, data_close.values, label="Harga Pasar Aktual (Indodax)", color="darkcyan", linewidth=2.5)
             ax_hist.plot(prediksi_arima_sinkron.index, prediksi_arima_sinkron.values, label="Estimasi ARIMA", color="orange", linestyle="--", alpha=0.8)
             ax_hist.plot(data_aktual_sinkron.index, hasil_prediksi_hybrid, label="Estimasi Hybrid (ARIMA-SVR)", color="crimson", linewidth=2)
             
-            ax_hist.set_title(f"Grafik Komparasi Pergerakan Harga vs Estimasi Model Finansial ({koin_terpilih})", fontsize=13)
+            ax_hist.set_title(f"Grafik Komparasi Pergerakan Harga vs Estimasi Model Finansial ({koin_terpilih}/IDR)", fontsize=13)
             ax_hist.set_xlabel("Skala Waktu (Tanggal)", fontsize=11)
             ax_hist.set_ylabel(f"Nilai Penutupan Aset ({mata_uang})", fontsize=11)
             ax_hist.grid(True, linestyle=":", alpha=0.5)
             ax_hist.legend(loc="upper left")
             
-            if mata_uang == "IDR":
-                ax_hist.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:,}".format(int(x))))
-                
+            ax_hist.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:,}".format(int(x))))
             st.pyplot(fig_hist)
             
             # --- BAGIAN F: PROYEKSI PERAMALAN MASA DEPAN ---
@@ -343,4 +265,4 @@ if not df_crypto.empty:
             st.error(f"Gagal melakukan kalkulasi matriks model: {err}")
             
 else:
-    st.warning("Saluran data kosong. Silakan periksa kembali koneksi internet Anda.")
+    st.warning("Saluran data kosong. Gagal memuat data dari API Core V2 Indodax.")
