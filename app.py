@@ -1,285 +1,263 @@
+import streamlit as pd
 import streamlit as st
 import pandas as pd
 import numpy as np
-import time
+import requests
+import datetime
+import yfinance as yf
 from statsmodels.tsa.arima.model import ARIMA
 from sklearn.svm import SVR
-from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import mean_squared_error, mean_absolute_error, mean_absolute_percentage_error
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.metrics import mean_absolute_percentage_error, root_mean_squared_error
 import matplotlib.pyplot as plt
-import datetime
-import requests
 
-# --- Pengaturan Halaman Utama ---
-st.title("Aplikasi Prediksi Cryptocurrency Berbasis Hybrid ARIMA-SVR")
-st.write("Aplikasi ini mengombinasikan data otomatis dari Google Sheets, model klasik ARIMA (Linear), dan Machine Learning SVR (Non-Linear).")
+# Konfigurasi Halaman Streamlit
+st.set_page_config(page_title="Prediksi Crypto Hybrid ARIMA-SVR", layout="wide")
 
-# --- DAFTAR 50 COIN CRYPTO TERPOPULER ---
-# --- DAFTAR COIN CRYPTO YANG STABIL DI GOOGLE FINANCE ---
-CRYPTO_LIST = [
-    "BTC-USD", "ETH-USD", "BNB-USD", "SOL-USD", "XRP-USD", 
-    "ADA-USD", "DOGE-USD", "AVAX-USD", "DOT-USD", "LINK-USD", 
-    "TRX-USD", "UNI-USD", "ICP-USD", "BCH-USD", "NEAR-USD", 
-    "FIL-USD", "LTC-USD", "ETC-USD", "APT-USD", "ATOM-USD", 
-    "XLM-USD", "HBAR-USD", "GRT-USD", "STX-USD", "TON-USD",
-    "THETA-USD", "FTM-USD", "AAVE-USD", "ALGO-USD", "EGLD-USD", 
-    "FLOW-USD", "MKR-USD", "SAND-USD", "MANA-USD", "XTZ-USD", 
-    "VET-USD", "AXS-USD", "EOS-USD", "NEO-USD", "LUNC-USD"
-]
+# ==========================================
+# 1. FUNGSI PENARIKAN DATA (DATA PIPELINE)
+# ==========================================
 
-# --- Pengaturan Data di Sidebar ---
-st.sidebar.header("1. Pengaturan Data Crypto")
-selected_crypto = st.sidebar.selectbox("Pilih Koin Crypto", CRYPTO_LIST)
-selected_start_date = st.sidebar.date_input("Tanggal Mulai (Baseline)", datetime.date(2021, 1, 1))
-selected_end_date = st.sidebar.date_input("Tanggal Akhir", datetime.date.today())
-
-if selected_end_date < selected_start_date:
-    st.sidebar.error("Kesalahan: Tanggal akhir harus setelah tanggal mulai.")
-    st.stop()
-
-# --- Pengaturan Parameter Model di Sidebar ---
-st.sidebar.header("2. Parameter Model Hybrid")
-st.sidebar.subheader("Parameter ARIMA (Linear)")
-p = st.sidebar.number_input("Orde AR (p)", min_value=0, max_value=5, value=1)
-d = st.sidebar.number_input("Differencing (d)", min_value=0, max_value=2, value=1)
-q = st.sidebar.number_input("Orde MA (q)", min_value=0, max_value=5, value=1)
-
-st.sidebar.subheader("Parameter SVR (Non-Linear)")
-svr_kernel = st.sidebar.selectbox("Kernel SVR", ["rbf", "linear", "poly"])
-svr_c = st.sidebar.number_input("Nilai Regulasi (C)", min_value=0.1, max_value=100.0, value=10.0, step=1.0)
-
-forecast_steps = st.sidebar.slider("Horizon Prediksi (Hari ke Depan)", 1, 30, 7)
-
-# ==========================================================
-# PEMBAHASAN TERAKHIR: PEMUTAKHIRAN PIPELINE GOOGLE SHEETS
-# ==========================================================
-
-def trigger_google_sheets_sync(ticker_name):
-    """Menyuruh Google Sheets memperbarui data historis via Apps Script Web App."""
-    WEB_APP_URL = "https://script.google.com/macros/s/AKfycbzgetHiohm82fw2t2YR_mYczSPO7zpSP6aSlMVRQWFBLLoZmJg6rNIJ5lR1dZlQRfp2fA/exec"
+def get_data_from_indodax(coin_symbol, days_back=365):
+    """Menarik data historis harian langsung dari API Publik Indodax (Rupiah - IDR)"""
     try:
-        # Mengirimkan parameter nama koin secara dinamis (?ticker=BTC-USD)
-        requests.get(f"{WEB_APP_URL}?ticker={ticker_name}")
-    except Exception as e:
-        st.warning(f"Gagal memicu sinkronisasi cloud: {e}")
-
-@st.cache_data(ttl=5) # Setel cache sangat rendah (5 detik) agar data koin baru tidak tersangkut cache lama
-def get_crypto_data_from_sheets(ticker_name):
-    """Membaca data historis dari Google Sheets dengan sistem jeda sinkronisasi cloud."""
-    
-    # 1. Kirim sinyal ke Google Apps Script Web App untuk mengganti data koin di Sheets
-    trigger_google_sheets_sync(ticker_name)
-    
-    # 2. BERI JEDA TUNGGU (PENTING): Memberikan waktu 4 detik agar Google Sheets selesai memuat formula
-    time.sleep(4)
-    
-    # 3. URL Publish to Web CSV Anda yang sudah diperbaiki
-    SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRLbUkprSxIP60BPBsTGG12NyDaqUEhGWoXER4jKMdETNTAjGUaCv913PQVEgABXf_37hdmU4spLl34/pub?output=csv"
-    
-    try:
-        df = pd.read_csv(SHEET_CSV_URL)
+        end_time = int(datetime.datetime.now().timestamp())
+        start_time = end_time - (days_back * 24 * 60 * 60)
         
-        if df.empty or len(df) < 5:
-            st.error(f"Google Sheets mendeteksi data '{ticker_name}' masih kosong atau dalam proses memuat di server Google. Coba lakukan refresh beberapa saat lagi.")
-            return pd.DataFrame()
-
-        # --- NORMALISASI KOLOM MULTI-BAHASA (INGGRIS / INDONESIA) ---
-        df.columns = [str(col).strip().lower() for col in df.columns]
+        # Endpoint resmi TradingView History Indodax (Resolution 'D' = Harian)
+        url = f"https://indodax.com/tradingview/history?symbol={coin_symbol.lower()}_idr&resolution=D&from={start_time}&to={end_time}"
         
-        # Deteksi Kolom Tanggal
-        if 'date' in df.columns:
-            df.rename(columns={'date': 'Date'}, inplace=True)
-        elif 'tanggal' in df.columns:
-            df.rename(columns={'tanggal': 'Date'}, inplace=True)
+        response = requests.get(url, timeout=10)
+        json_data = response.json()
+        
+        if json_data.get('s') == 'ok':
+            df = pd.DataFrame({
+                'Date': pd.to_datetime(json_data['t'], unit='s'),
+                'Open': json_data['o'],
+                'High': json_data['h'],
+                'Low': json_data['l'],
+                'Close': json_data['c'],
+                'Volume': json_data['v']
+            })
+            df.set_index('Date', inplace=True)
+            df.sort_index(inplace=True)
+            return df
         else:
-            df.rename(columns={df.columns[0]: 'Date'}, inplace=True)
-            
-        # Deteksi Kolom Close / Tutup
-        if 'close' in df.columns:
-            df.rename(columns={'close': 'Close'}, inplace=True)
-        elif 'tutup' in df.columns:
-            df.rename(columns={'tutup': 'Close'}, inplace=True)
-            
-        # Deteksi Kolom Lainnya
-        kolom_kamus = {
-            'open': 'Open', 'buka': 'Open',
-            'high': 'High', 'tinggi': 'High',
-            'low': 'Low', 'rendah': 'Low',
-            'volume': 'Volume'
-        }
-        df.rename(columns=kolom_kamus, inplace=True)
-
-        # Konversi Tanggal
-        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-        df.dropna(subset=['Date'], inplace=True)
-        df.set_index('Date', inplace=True)
-        df.sort_index(inplace=True)
-        
-        # Konversi ke Numerik
-        for col in ['Open', 'High', 'Low', 'Close', 'Volume']:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
-        
-        return df
+            st.error(f"Indodax API merespons dengan error: {json_data.get('errmsg', 'Unknown')}")
+            return pd.DataFrame()
     except Exception as e:
-        st.error(f"Gagal memuat data dari Google Sheets. Detail Masalah: {e}")
+        st.error(f"Gagal memuat data dari Indodax: {e}")
         return pd.DataFrame()
-# --- Eksekusi Pengambilan Data terintegrasi Google Sheets ---
-df_crypto = get_crypto_data_from_sheets(selected_crypto)
 
-# --- Alur Tampilan Utama Aplikasi ---
-if not df_crypto.empty and 'Close' in df_crypto.columns:
-    st.subheader(f"Data Historis Harga {selected_crypto} (Sumber: Pipeline Google Sheets)")
-    st.write(df_crypto[['Open', 'High', 'Low', 'Close', 'Volume']].tail()) 
-    st.line_chart(df_crypto['Close']) 
-    
-    # --- Tombol Eksekusi Model Hybrid ---
-    if st.button("Jalankan Prediksi Hybrid ARIMA-SVR"):
-        with st.spinner(f"Melatih model Hybrid untuk {selected_crypto}..."):
-            try:
-                # Sinkronisasi interval harian (DAILY)
-                series_close = df_crypto['Close'].asfreq('D')
-                if series_close.isnull().any():
-                    series_close = series_close.ffill()
+def get_data_from_yahoo(ticker_name, days_back=365):
+    """Menarik data historis harian langsung dari Yahoo Finance API via yfinance (USD)"""
+    try:
+        hari_ini = datetime.date.today()
+        tanggal_mulai = hari_ini - datetime.timedelta(days=days_back)
+        
+        df = yf.download(
+            ticker_name, 
+            start=tanggal_mulai.strftime("%Y-%m-%d"), 
+            end=hari_ini.strftime("%Y-%m-%d"),
+            progress=False
+        )
+        
+        if not df.empty:
+            # Normalisasi multi-index jika library yfinance versi terbaru mengembalikannya
+            if isinstance(df.columns, pd.MultiIndex):
+                df.columns = df.columns.droplevel(1)
                 
-                # ==========================================
-                # LENGKAH 1: TRAINING MODEL ARIMA (LINEAR)
-                # ==========================================
-                model_arima = ARIMA(series_close, order=(p, d, q))
-                model_arima_fit = model_arima.fit()
-                arima_fitted = model_arima_fit.fittedvalues
-                residuals = series_close - arima_fitted
-                
-                # ==========================================
-                # LANGKAH 2: TRAINING MODEL SVR (NON-LINEAR)
-                # ==========================================
-                look_back = 3
-                X_svr, y_svr = [], []
-                res_values = residuals.values
-                
-                for i in range(len(res_values) - look_back):
-                    X_svr.append(res_values[i:(i + look_back)])
-                    y_svr.append(res_values[i + look_back])
-                
-                X_svr, y_svr = np.array(X_svr), np.array(y_svr)
-                
-                scaler = StandardScaler()
-                X_svr_scaled = scaler.fit_transform(X_svr)
-                
-                model_svr = SVR(kernel=svr_kernel, C=svr_c)
-                model_svr.fit(X_svr_scaled, y_svr)
-                
-                # Mendapatkan fitted values dari SVR untuk data historis
-                svr_fitted_res = model_svr.predict(X_svr_scaled)
-                
-                # Keselarasan panjang data aktual untuk evaluasi
-                aktual_evaluasi = series_close.values[look_back:]
-                arima_evaluasi = arima_fitted.values[look_back:]
-                hybrid_evaluasi = arima_evaluasi + svr_fitted_res
-                
-                # ==========================================
-                # HITUNG METRIK EVALUASI (RMSE, MAE, MAPE)
-                # ==========================================
-                rmse_arima = np.sqrt(mean_squared_error(aktual_evaluasi, arima_evaluasi))
-                mae_arima = mean_absolute_error(aktual_evaluasi, arima_evaluasi)
-                mape_arima = mean_absolute_percentage_error(aktual_evaluasi, arima_evaluasi) * 100
-                
-                residual_aktual = res_values[look_back:]
-                rmse_svr = np.sqrt(mean_squared_error(residual_aktual, svr_fitted_res))
-                mae_svr = mean_absolute_error(residual_aktual, svr_fitted_res)
-                mape_svr = mean_absolute_percentage_error(residual_aktual, svr_fitted_res) * 100
-                
-                rmse_hybrid = np.sqrt(mean_squared_error(aktual_evaluasi, hybrid_evaluasi))
-                mae_hybrid = mean_absolute_error(aktual_evaluasi, hybrid_evaluasi)
-                mape_hybrid = mean_absolute_percentage_error(aktual_evaluasi, hybrid_evaluasi) * 100
+            df.index = pd.to_datetime(df.index)
+            df.index.name = 'Date'
+            df.sort_index(inplace=True)
+            
+            # Memastikan kolom bertipe numerik float
+            for col in ['Open', 'High', 'Low', 'Close', 'Volume']:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+            return df
+        else:
+            return pd.DataFrame()
+    except Exception as e:
+        st.error(f"Gagal memuat data dari Yahoo Finance: {e}")
+        return pd.DataFrame()
 
-                # Tampilkan Skor Performa di Halaman Utama Web
-                st.subheader("📊 Evaluasi Performa Model (Data Historis)")
-                
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.markdown(f"""
-                    **Model ARIMA**
-                    * RMSE: `{rmse_arima:.4f}`
-                    * MAE: `{mae_arima:.4f}`
-                    * MAPE: `{mape_arima:.2f}%`
-                    """)
-                with col2:
-                    st.markdown(f"""
-                    **Model SVR (Residual)**
-                    * RMSE: `{rmse_svr:.4f}`
-                    * MAE: `{mae_svr:.4f}`
-                    * MAPE: `{mape_svr:.2f}%`
-                    """)
-                with col3:
-                    st.markdown(f"""
-                    **Model Hybrid (ARIMA-SVR)**
-                    * RMSE: `{rmse_hybrid:.4f}`
-                    * MAE: `{mae_hybrid:.4f}`
-                    * **MAPE: `{mape_hybrid:.2f}%`**
-                    """)
-                
-                # ==========================================
-                # LANGKAH 3: PROSES PERAMALAN (FORECASTING MASA DEPAN)
-                # ==========================================
-                arima_forecast = model_arima_fit.forecast(steps=forecast_steps)
-                
-                svr_forecast = []
-                input_res = list(res_values[-look_back:])
-                
-                for _ in range(forecast_steps):
-                    input_res_scaled = scaler.transform([input_res[-look_back:]])
-                    pred_res = model_svr.predict(input_res_scaled)[0]
-                    svr_forecast.append(pred_res)
-                    input_res.append(pred_res)
-                
-                hybrid_forecast = arima_forecast.values + np.array(svr_forecast)
-                
-                # ==========================================
-                # LANGKAH 4: VISUALISASI DAN OUTPUT CSV
-                # ==========================================
-                last_date = series_close.index[-1]
-                forecast_index = pd.date_range(start=last_date + pd.Timedelta(days=1), periods=forecast_steps, freq='D')
-                
-                df_forecast = pd.DataFrame({
-                    'Prediksi ARIMA (Linear)': arima_forecast.values,
-                    'Koreksi SVR (Non-Linear)': svr_forecast,
-                    'Total Prediksi Hybrid ($)': hybrid_forecast
-                }, index=forecast_index)
-                df_forecast.index.name = 'Tanggal'
-                
-                st.subheader(f"🔮 Hasil Peramalan {forecast_steps} Hari ke Depan")
-                st.write(df_forecast)
-                
-                # Integrasi Tombol Download CSV
-                @st.cache_data
-                def convert_df_to_csv(df):
-                    return df.to_csv(index=True).encode('utf-8')
-                
-                csv_data = convert_df_to_csv(df_forecast)
-                
-                st.download_button(
-                    label="📥 Unduh Hasil Prediksi (.CSV)",
-                    data=csv_data,
-                    file_name=f"prediksi_hybrid_{selected_crypto}_{last_date.strftime('%Y%m%d')}.csv",
-                    mime="text/csv",
-                    key="download-csv"
-                )
-                
-                # Plot Visualisasi Perbandingan Grafis
-                fig, ax = plt.subplots(figsize=(10, 5))
-                ax.plot(series_close.tail(30), label='Data Historis Aktual (30 Hari Terakhir)', color='orange', linewidth=2)
-                ax.plot(df_forecast['Total Prediksi Hybrid ($)'], label='Hasil Akhir Hybrid (ARIMA+SVR)', color='green', linestyle='--', marker='o')
-                ax.plot(df_forecast['Prediksi ARIMA (Linear)'], label='Prediksi Standar ARIMA saja', color='red', linestyle=':', alpha=0.7)
-                
-                ax.set_title(f"Grafik Estimasi Model Hybrid ARIMA-SVR Koin {selected_crypto}", fontsize=14)
-                ax.set_xlabel("Tanggal", fontsize=11)
-                ax.set_ylabel("Harga (USD)", fontsize=11)
-                ax.legend()
-                ax.grid(True, linestyle=':', alpha=0.6)
-                st.pyplot(fig)
-                
-            except Exception as e:
-                st.error(f"Gagal memproses model Hybrid. Detail Masalah: {e}")
+# ==========================================
+# 2. ANTARMUKA PENGGUNA (SIDEBAR PARAMETER)
+# ==========================================
+
+st.sidebar.title("🛠️ Konfigurasi Aplikasi")
+
+# --- OPSI 1: PILIHAN SUMBER DATA ---
+st.sidebar.subheader("1. Sumber Data & Koin")
+sumber_data = st.sidebar.selectbox(
+    "Pilih Sumber Data:",
+    ["Yahoo Finance (USD)", "Indodax Bursa Indonesia (IDR)"]
+)
+
+# Sesuaikan list koin berdasarkan pilihan sumber data agar user tidak bingung format
+if sumber_data == "Yahoo Finance (USD)":
+    list_koin = ["BTC-USD", "ETH-USD", "BNB-USD", "SOL-USD", "XRP-USD", "ADA-USD"]
+    koin_terpilih = st.sidebar.selectbox("Pilih Koin Crypto:", list_koin)
 else:
-    st.warning(f"Data untuk simbol '{selected_crypto}' gagal dimuat. Pastikan ID CSV Publish to Web Google Sheets sudah benar.")
+    list_koin = ["BTC", "ETH", "BNB", "SOL", "XRP", "ADA"]
+    koin_terpilih = st.sidebar.selectbox("Pilih Koin Crypto (Pair IDR):", list_koin)
+
+# Parameter Rentang Waktu Historis
+rentang_hari = st.sidebar.slider("Rentang Data Historis (Hari ke Belakang):", 180, 730, 365)
+
+# --- OPSI 2: PARAMETER ARIMA ---
+st.sidebar.subheader("2. Parameter ARIMA (Linear)")
+p = st.sidebar.number_input("Orde AR (p):", min_value=0, max_value=5, value=1, step=1)
+d = st.sidebar.number_input("Differencing (d):", min_value=0, max_value=2, value=1, step=1)
+q = st.sidebar.number_input("Orde MA (q):", min_value=0, max_value=5, value=1, step=1)
+
+# --- OPSI 3: PARAMETER SVR ---
+st.sidebar.subheader("3. Parameter SVR (Non-Linear Residu)")
+kernel = st.sidebar.selectbox("Kernel SVR:", ["rbf", "linear", "poly"])
+c_param = st.sidebar.number_input("Nilai Regularisasi C:", min_value=0.1, max_value=1000.0, value=100.0, step=10.0)
+gamma = st.sidebar.selectbox("Gamma SVR:", ["scale", "auto"])
+
+# Parameter Prediksi Masa Depan
+hari_prediksi = st.sidebar.slider("Jumlah Hari Prediksi ke Depan:", 1, 30, 7)
+
+# ==========================================
+# 3. ALUR UTAMA EKSEKUSI DATA (MAIN PAGE)
+# ==========================================
+
+st.title("📊 Aplikasi Prediksi Cryptocurrency Berbasis Hybrid ARIMA-SVR")
+st.markdown("Aplikasi ini mengombinasikan model klasik **ARIMA** (untuk menangkap tren linear) dan Machine Learning **SVR** (untuk memodelkan residu/galat non-linear).")
+
+# Mengambil data berdasarkan opsi yang dipilih pengguna
+with st.spinner("Mengunduh data secara real-time dari API bursa..."):
+    if sumber_data == "Yahoo Finance (USD)":
+        df_crypto = get_data_from_yahoo(koin_terpilih, days_back=rentang_hari)
+        mata_uang = "USD"
+    else:
+        df_crypto = get_data_from_indodax(koin_terpilih, days_back=rentang_hari)
+        mata_uang = "IDR"
+
+# Validasi jika data berhasil diambil
+if not df_crypto.empty:
+    st.success(f"Berhasil memuat {len(df_crypto)} baris data historis {koin_terpilih} dari {sumber_data}!")
+    
+    # Tampilkan Ringkasan Data Historis dalam Expander
+    with st.expander("👀 Lihat Tabel Data Historis Lengkap"):
+        st.dataframe(df_crypto.tail(10))
+        
+    # Ambil data harga 'Close' sebagai target analisis runtun waktu
+    data_close = df_crypto['Close'].astype(float)
+    
+    # ==========================================
+    # 4. PEMODELAN HYBRID (ARIMA + SVR)
+    # ==========================================
+    
+    try:
+        # ---- LANGKAH 1: Pemodelan Linear dengan ARIMA ----
+        # Fit model ARIMA berdasarkan nilai p, d, q dari input pengguna
+        model_arima = ARIMA(data_close, order=(p, d, q))
+        model_arima_fitted = model_arima.fit()
+        
+        # Dapatkan nilai hasil prediksi ARIMA di masa lalu (In-sample prediction)
+        prediksi_linear_arima = model_arima_fitted.fittedvalues
+        
+        # Hitung Nilai Residu/Galat (Data Aktual dikurangi Prediksi Linear ARIMA)
+        residu_arima = data_close - prediksi_linear_arima
+        
+        # ---- LANGKAH 2: Pemodelan Non-Linear Residu dengan SVR ----
+        # Siapkan struktur data lagged untuk melatih SVR menangkap pola residu
+        df_residu = pd.DataFrame({'Residu': residu_arima})
+        df_residu['Lag_1'] = df_residu['Residu'].shift(1)
+        df_residu.dropna(inplace=True)
+        
+        X_svr = df_residu[['Lag_1']].values
+        y_svr = df_residu['Residu'].values
+        
+        # Skalasi Fitur Residu demi performa maksimal kernel SVR
+        scaler = MinMaxScaler(feature_range=(-1, 1))
+        X_svr_scaled = scaler.fit_transform(X_svr)
+        
+        # Inisialisasi dan latih model SVR
+        model_svr = SVR(kernel=kernel, C=c_param, gamma=gamma)
+        model_svr.fit(X_svr_scaled, y_svr)
+        
+        # Prediksi pola residu non-linear
+        prediksi_residu_svr = model_svr.predict(X_svr_scaled)
+        
+        # ---- LANGKAH 3: Kombinasi Hybrid (Hasil ARIMA + Hasil SVR) ----
+        # Sesuaikan panjang baris data karena efek lag_1 pada proses SVR
+        data_aktual_cocok = data_close.iloc[1:]
+        prediksi_arima_cocok = prediksi_linear_arima.iloc[1:]
+        
+        # Nilai akhir Hybrid = Hasil ARIMA + Hasil SVR koreksi residu
+        hasil_prediksi_hybrid = prediksi_arima_cocok + prediksi_residu_svr
+        
+        # ==========================================
+        # 5. METRIK EVALUASI AKURASI MODEL
+        # ==========================================
+        
+        # Hitung Metrik Akurasi Nilai Hybrid dibanding Data Aktual
+        mape_hybrid = mean_absolute_percentage_error(data_aktual_cocok, hasil_prediksi_hybrid) * 100
+        rmse_hybrid = root_mean_squared_error(data_aktual_cocok, hasil_prediksi_hybrid)
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric(label="📊 Akurasi Model (MAPE)", value=f"{mape_hybrid:.2f} %")
+        with col2:
+            st.metric(label="📉 Nilai Eror (RMSE)", value=f"{rmse_hybrid:,.2f} {mata_uang}")
+            
+        # ==========================================
+        # 6. VISUALISASI GRAFIK HASIL
+        # ==========================================
+        
+        st.subheader(f"📈 Grafik Perbandingan Harga Aktual vs Hasil Prediksi Hybrid ({koin_terpilih})")
+        
+        fig, ax = plt.subplots(figsize=(14, 6))
+        ax.plot(data_close.index, data_close.values, label="Data Aktual Asli (Pasar)", color="royalblue", linewidth=2)
+        ax.plot(data_aktual_cocok.index, hasil_prediksi_hybrid, label="Hasil Model Hybrid ARIMA-SVR", color="crimson", linestyle="--", linewidth=1.5)
+        
+        ax.set_title(f"Analisis Tren Finansial {koin_terpilih} ({sumber_data})", fontsize=14)
+        ax.set_xlabel("Tanggal", fontsize=12)
+        ax.set_ylabel(f"Harga ({mata_uang})", fontsize=12)
+        ax.grid(True, linestyle=":", alpha=0.6)
+        ax.legend(loc="upper left")
+        
+        if mata_uang == "IDR":
+            ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:,}".format(int(x))))
+            
+        st.pyplot(fig)
+        
+        # ---- LANGKAH 4: PROYEKSI PREDIKSI MASA DEPAN ----
+        st.subheader(f"🔮 Proyeksi Prediksi Masa Depan ({hari_prediksi} Hari ke Depan)")
+        
+        # 1. Forecast Masa Depan dari ARIMA
+        forecast_arima = model_arima_fitted.forecast(steps=hari_prediksi)
+        
+        # 2. Forecast Residu dari SVR untuk masa depan secara autoregresif
+        residu_terakhir = y_svr[-1]
+        forecast_residu_svr = []
+        
+        for _ in range(hari_prediksi):
+            scaled_lag = scaler.transform([[residu_terakhir]])
+            pred_residu = model_svr.predict(scaled_lag)[0]
+            forecast_residu_svr.append(pred_residu)
+            residu_terakhir = pred_residu  # Update lag dengan hasil prediksi terbaru
+            
+        # 3. Gabungkan nilai Proyeksi Masa Depan
+        proyeksi_masa_depan_hybrid = forecast_arima + np.array(forecast_residu_svr)
+        
+        # Buat Tanggal indeks untuk masa depan
+        tanggal_terakhir = data_close.index[-1]
+        tanggal_masa_depan = pd.date_range(start=tanggal_terakhir + datetime.timedelta(days=1), periods=hari_prediksi)
+        
+        df_proyeksi = pd.DataFrame({
+            f"Proyeksi Harga Hybrid ({mata_uang})": proyeksi_masa_depan_hybrid
+        }, index=tanggal_masa_depan)
+        df_proyeksi.index.name = "Tanggal Masa Depan"
+        
+        st.table(df_proyeksi)
+        
+    except Exception as model_error:
+        st.error(f"Gagal melakukan komputasi matriks matematika model Hybrid: {model_error}")
+        st.info("Saran: Coba sesuaikan kombinasi nilai p, d, q ARIMA Anda pada sidebar untuk kecocokan stasioneritas data.")
+else:
+    st.warning("Gagal memproses visualisasi karena pipa penarikan data kosong. Silakan periksa kembali koneksi internet Anda.")
