@@ -62,7 +62,7 @@ def trigger_google_sheets_sync(ticker_name):
     except Exception as e:
         st.warning(f"Gagal memicu sinkronisasi cloud: {e}")
 
-@st.cache_data(ttl=3600) # Simpan cache selama 1 jam agar tidak berulang kali menembak url cloud
+@st.cache_data(ttl=10) # Simpan cache selama 1 jam agar tidak berulang kali menembak url cloud
 #@st.cache_data(ttl=10) # Perkecil TTL ke 10 detik saat pengujian agar data langsung segar
 def get_crypto_data_from_sheets(ticker_name):
     """Membaca data historis dari Google Sheets dengan toleransi Multi-bahasa (ID/EN)."""
