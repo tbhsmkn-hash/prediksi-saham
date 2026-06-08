@@ -152,9 +152,30 @@ if not df_crypto.empty and 'Close' in df_crypto.columns:
                 }, index=forecast_index)
                 df_forecast.index.name = 'Tanggal'
                 
+                # ... (Kode Langkah 4: Tampilkan Tabel Hasil Peramalan sebelumnya) ...
                 st.success(f"Proses peramalan Hybrid selesai untuk {forecast_steps} hari ke depan!")
                 st.write(df_forecast)
                 
+                # ==========================================
+                # FITUR TAMBAHAN: DOWNLOAD DATASET TO .CSV
+                # ==========================================
+                # Mengonversi DataFrame ke format CSV (dengan encoding utf-8)
+                @st.cache_data
+                def convert_df_to_csv(df):
+                    return df.to_csv(index=True).encode('utf-8')
+                
+                csv_data = convert_df_to_csv(df_forecast)
+                
+                # Menampilkan tombol unduh tepat di bawah tabel
+                st.download_button(
+                    label="📥 Unduh Hasil Prediksi (.CSV)",
+                    data=csv_data,
+                    file_name=f"prediksi_hybrid_{selected_crypto}_{last_date.strftime('%Y%m%d')}.csv",
+                    mime="text/csv",
+                    key="download-csv"
+                )
+                
+                # ... (Kode Plot Visualisasi Grafis selanjutnya) ...
                 # Plot Visualisasi Perbandingan Grafis
                 fig, ax = plt.subplots(figsize=(10, 5))
                 ax.plot(series_close.tail(30), label='Data Historis Aktual (30 Hari Terakhir)', color='orange', linewidth=2)
