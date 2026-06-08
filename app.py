@@ -105,16 +105,9 @@ sumber_data = st.sidebar.selectbox(
 )
 
 if sumber_data == "Yahoo Finance (USD)":
-    list_koin = ["BTC-USD", "ETH-USD", "BNB-USD", "SOL-USD", "XRP-USD", 
-		"ADA-USD", "DOGE-USD", "SHIB-USD", "AVAX-USD", "DOT-USD",
-		"MATIC-USD", "LINK-USD", "TRX-USD", "UNI-USD", "ICP-USD",
-		"BCH-USD", "NEAR-USD", "FIL-USD", "LTC-USD", "LEO-USD",
-		"ETC-USD", "APT-USD", "ATOM-USD", "XLM-USD", "HBAR-USD",
-		"IMX-USD", "GRT-USD", "STX-USD", "KAS-USD", "TON-USD",
-		"PEPE-USD", "WIF-USD", "FLOKI-USD", "RUNE-USD", "RENDER-USD",
-		"THETA-USD", "FTM-USD", "LUNC-USD", "AAVE-USD", "ALGO-USD",
-		"EGLD-USD", "FLOW-USD", "MKR-USD", "SAND-USD", "MANA-USD",
-		"XTZ-USD", "VET-USD", "AXS-USD", "EOS-USD", "NEO-USD"]
+    list_koin = ["BTC-USD", "ETH-USD", "BNB-USD", "SOL-USD", "XRP-USD","ADA-USD", "DOGE-USD", "SHIB-USD", "AVAX-USD", "DOT-USD","MATIC-USD", "LINK-USD", "TRX-USD", "UNI-USD", "ICP-USD","BCH-USD", "NEAR-USD", "FIL-USD", "LTC-USD", "LEO-USD","ETC-USD", "APT-USD", "ATOM-USD", "XLM-USD", "HBAR-USD","IMX-USD", "GRT-USD", "STX-USD", "KAS-USD", "TON-USD","PEPE-USD", "WIF-USD", "FLOKI-USD", "RUNE-USD", "RENDER-USD",
+		"THETA-USD", "FTM-USD", "LUNC-USD", "AAVE-USD", "ALGO-USD","EGLD-USD", "FLOW-USD", "MKR-USD", "SAND-USD", "MANA-USD","XTZ-USD",
+		"VET-USD", "AXS-USD", "EOS-USD", "NEO-USD"]
     koin_terpilih = st.sidebar.selectbox("Pilih Koin Kripto:", list_koin)
 else:
     list_koin = ["BTC", "ETH", "BNB", "SOL", "XRP", 
@@ -127,8 +120,7 @@ else:
 		"THETA", "FTM", "LUNC", "AAVE", "ALGO",
 		"EGLD", "FLOW", "MKR", "SAND", "MANA",
 		"XTZ", "VET", "AXS", "EOS", "NEO"]
-	]
-    koin_terpilih = st.sidebar.selectbox("Pilih Koin Kripto (Pair IDR):", list_koin)
+	koin_terpilih = st.sidebar.selectbox("Pilih Koin Kripto (Pair IDR):", list_koin)
 
 rentang_hari = st.sidebar.slider("Rentang Data Historis (Hari):", 180, 730, 365)
 
