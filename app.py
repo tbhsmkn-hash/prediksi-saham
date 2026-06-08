@@ -69,17 +69,10 @@ def get_data_from_indodax(coin_symbol, days_back=365):
 st.sidebar.title("⚙️ Pengaturan Parameter")
 
 st.sidebar.subheader("1. Sumber Data Pasar")
-    list_koin = ["BTC", "ETH", "BNB", "SOL", "XRP", 
-		"ADA", "DOGE", "SHIB", "AVAX", "DOT",
-		"MATIC", "LINK", "TRX", "UNI", "ICP",
-		"BCH", "NEAR", "FIL", "LTC", "LEO",
-		"ETC", "APT", "ATOM", "XLM", "HBAR",
-		"IMX", "GRT", "STX", "KAS", "TON",
-		"PEPE", "WIF", "FLOKI", "RUNE", "RENDER",
-		"THETA", "FTM", "LUNC", "AAVE", "ALGO",
-		"EGLD", "FLOW", "MKR", "SAND", "MANA",
-		"XTZ", "VET", "AXS", "EOS", "NEO"]
-    koin_terpilih = st.sidebar.selectbox("Pilih Koin Kripto (Pair IDR Resmi Indodax):", list_koin)
+list_koin = ["BTC", "ETH", "BNB", "SOL", "XRP","ADA", "DOGE", "SHIB", "AVAX", "DOT","MATIC", "LINK", "TRX", "UNI", "ICP",
+		"BCH", "NEAR", "FIL", "LTC", "LEO","ETC", "APT", "ATOM", "XLM", "HBAR","IMX", "GRT", "STX", "KAS", "TON","PEPE", "WIF", "FLOKI", "RUNE", "RENDER",
+		"THETA", "FTM", "LUNC", "AAVE", "ALGO","EGLD", "FLOW", "MKR", "SAND", "MANA","XTZ", "VET", "AXS", "EOS", "NEO"]
+koin_terpilih = st.sidebar.selectbox("Pilih Koin Kripto (Pair IDR Resmi Indodax):", list_koin)
 
 rentang_hari = st.sidebar.slider("Rentang Data Historis (Hari):", 180, 730, 365)
 
