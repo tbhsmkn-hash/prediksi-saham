@@ -110,16 +110,9 @@ if sumber_data == "Yahoo Finance (USD)":
 		"VET-USD", "AXS-USD", "EOS-USD", "NEO-USD"]
     koin_terpilih = st.sidebar.selectbox("Pilih Koin Kripto:", list_koin)
 else:
-    list_koin = ["BTC", "ETH", "BNB", "SOL", "XRP", 
-		"ADA", "DOGE", "SHIB", "AVAX", "DOT",
-		"MATIC", "LINK", "TRX", "UNI", "ICP",
-		"BCH", "NEAR", "FIL", "LTC", "LEO",
-		"ETC", "APT", "ATOM", "XLM", "HBAR",
-		"IMX", "GRT", "STX", "KAS", "TON",
-		"PEPE", "WIF", "FLOKI", "RUNE", "RENDER",
-		"THETA", "FTM", "LUNC", "AAVE", "ALGO",
-		"EGLD", "FLOW", "MKR", "SAND", "MANA",
-		"XTZ", "VET", "AXS", "EOS", "NEO"]
+    list_koin = ["BTC", "ETH", "BNB", "SOL", "XRP","ADA", "DOGE", "SHIB", "AVAX", "DOT","MATIC", "LINK", "TRX", "UNI", "ICP","BCH", "NEAR", "FIL", "LTC", "LEO",
+		"ETC", "APT", "ATOM", "XLM", "HBAR","IMX", "GRT", "STX", "KAS", "TON","PEPE", "WIF", "FLOKI", "RUNE", "RENDER","THETA", "FTM", "LUNC", "AAVE", "ALGO",
+		"EGLD", "FLOW", "MKR", "SAND", "MANA","XTZ", "VET", "AXS", "EOS", "NEO"]
 	koin_terpilih = st.sidebar.selectbox("Pilih Koin Kripto (Pair IDR):", list_koin)
 
 rentang_hari = st.sidebar.slider("Rentang Data Historis (Hari):", 180, 730, 365)
