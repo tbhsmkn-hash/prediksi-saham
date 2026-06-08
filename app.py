@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import time
 from statsmodels.tsa.arima.model import ARIMA
 from sklearn.svm import SVR
 from sklearn.preprocessing import StandardScaler
