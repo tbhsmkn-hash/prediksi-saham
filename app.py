@@ -70,7 +70,7 @@ def get_crypto_data_from_sheets(ticker_name):
     trigger_google_sheets_sync(ticker_name)
     
     # 2. Masukkan URL Publish to Web CSV Anda di sini
-    SHEET_CSV_URL = "PASANG_URL_DOWNLOAD_CSV_ANDA_DI_SINI"
+    SHEET_CSV_URL = https://docs.google.com/spreadsheets/d/e/2PACX-1vRLbUkprSxIP60BPBsTGG12NyDaqUEhGWoXER4jKMdETNTAjGUaCv913PQVEgABXf_37hdmU4spLl34/pubhtml"
     
     try:
         df = pd.read_csv(SHEET_CSV_URL)
