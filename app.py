@@ -116,7 +116,7 @@ if not df_crypto.empty:
             data=csv_buffer,
             file_name=f"dataset_indodax_{koin_terpilih}_{datetime.date.today()}.csv",
             mime="text/csv",
-            use_container_width=True
+            width="stretch"
         )
 
     # --- BAGIAN B: ANALISIS STATISTIK DESKRIPTIF ---
