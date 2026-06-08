@@ -64,33 +64,67 @@ def trigger_google_sheets_sync(ticker_name):
         st.warning(f"Gagal memicu sinkronisasi cloud: {e}")
 
 @st.cache_data(ttl=3600) # Simpan cache selama 1 jam agar tidak berulang kali menembak url cloud
+@st.cache_data(ttl=10) # Perkecil TTL ke 10 detik saat pengujian agar data langsung segar
 def get_crypto_data_from_sheets(ticker_name):
-    """Membaca data historis hasil pemrosesan Google Sheets yang diekspor sebagai CSV."""
-    # SINKRONISASI 1: Picu Web App Apps Script untuk memperbarui Sheets terlebih dahulu
+    """Membaca data historis dari Google Sheets dengan toleransi Multi-bahasa (ID/EN)."""
+    # 1. Picu Web App Apps Script untuk ganti koin di Sheets
     trigger_google_sheets_sync(ticker_name)
     
-    # SINKRONISASI 2: Ambil data dari tautan 'Publish to Web' berbentuk CSV milik Google Sheets Anda
-    # GANTI URL DI BAWAH INI dengan URL hasil "Publikasikan di Web (Sebagai CSV)" dari Google Sheets Anda
-    SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/CEK_KEMBALI_ID_CSV_PUBLISH_ANDA/pub?output=csv"
+    # 2. Masukkan URL Publish to Web CSV Anda di sini
+    SHEET_CSV_URL = "PASANG_URL_DOWNLOAD_CSV_ANDA_DI_SINI"
     
     try:
         df = pd.read_csv(SHEET_CSV_URL)
         
-        # Sesuai dengan skema output formula =GOOGLEFINANCE() historis
-        # Kolom biasanya: Date, Open, High, Low, Close, Volume
-        df['Date'] = pd.to_datetime(df['Date'])
+        if df.empty:
+            st.error("Google Sheets kosong. Pastikan Apps Script Anda sudah berjalan di Sheets.")
+            return pd.DataFrame()
+
+        # --- NORMALISASI KOLOM MULTI-BAHASA (INGGRIS / INDONESIA) ---
+        # Mengubah semua nama kolom menjadi huruf kecil agar mudah dicocokkan
+        df.columns = [str(col).strip().lower() for col in df.columns]
+        
+        # Deteksi Kolom Tanggal
+        if 'date' in df.columns:
+            df.rename(columns={'date': 'Date'}, inplace=True)
+        elif 'tanggal' in df.columns:
+            df.rename(columns={'tanggal': 'Date'}, inplace=True)
+        else:
+            # Jika baris pertama rusak, paksa kolom pertama menjadi 'Date'
+            df.rename(columns={df.columns[0]: 'Date'}, inplace=True)
+            
+        # Deteksi Kolom Close / Tutup
+        if 'close' in df.columns:
+            df.rename(columns={'close': 'Close'}, inplace=True)
+        elif 'tutup' in df.columns:
+            df.rename(columns={'tutup': 'Close'}, inplace=True)
+            
+        # Deteksi Kolom Lainnya (Open, High, Low, Volume) untuk kebutuhan tampilan .tail()
+        kolom_kamus = {
+            'open': 'Open', 'buka': 'Open',
+            'high': 'High', 'tinggi': 'High',
+            'low': 'Low', 'rendah': 'Low',
+            'volume': 'Volume'
+        }
+        df.rename(columns=kolom_kamus, inplace=True)
+
+        # Ubah string tanggal menjadi objek datetime Python
+        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+        df.dropna(subset=['Date'], inplace=True)
         df.set_index('Date', inplace=True)
         
-        # Memastikan konformitas data numeric
+        # Urutkan berdasarkan tanggal dari lampau ke terbaru
+        df.sort_index(inplace=True)
+        
+        # Konversi kolom harga ke angka numeric
         for col in ['Open', 'High', 'Low', 'Close', 'Volume']:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors='coerce')
-                
+        
         return df
     except Exception as e:
         st.error(f"Gagal memuat data dari Google Sheets. Detail Masalah: {e}")
         return pd.DataFrame()
-
 # --- Eksekusi Pengambilan Data terintegrasi Google Sheets ---
 df_crypto = get_crypto_data_from_sheets(selected_crypto)
 
