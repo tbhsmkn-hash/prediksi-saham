@@ -121,7 +121,7 @@ else:
 		"PEPE", "WIF", "FLOKI", "RUNE", "RENDER",
 		"THETA", "FTM", "LUNC", "AAVE", "ALGO",
 		"EGLD", "FLOW", "MKR", "SAND", "MANA",
-		"XTZ", "VET", "AXS", "EOS", "NEO""]
+		"XTZ", "VET", "AXS", "EOS", "NEO"]
     koin_terpilih = st.sidebar.selectbox("Pihal Koin Crypto (Pair IDR):", list_koin)
 
 rentang_hari = st.sidebar.slider("Rentang Data Historis (Hari Ke Belakang):", 180, 730, 365)
