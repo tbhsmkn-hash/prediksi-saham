@@ -62,25 +62,27 @@ def trigger_google_sheets_sync(ticker_name):
     except Exception as e:
         st.warning(f"Gagal memicu sinkronisasi cloud: {e}")
 
-@st.cache_data(ttl=10) # Simpan cache selama 1 jam agar tidak berulang kali menembak url cloud
-#@st.cache_data(ttl=10) # Perkecil TTL ke 10 detik saat pengujian agar data langsung segar
+@st.cache_data(ttl=5) # Setel cache sangat rendah (5 detik) agar data koin baru tidak tersangkut cache lama
 def get_crypto_data_from_sheets(ticker_name):
-    """Membaca data historis dari Google Sheets dengan toleransi Multi-bahasa (ID/EN)."""
-    # 1. Picu Web App Apps Script untuk ganti koin di Sheets
+    """Membaca data historis dari Google Sheets dengan sistem jeda sinkronisasi cloud."""
+    
+    # 1. Kirim sinyal ke Google Apps Script Web App untuk mengganti data koin di Sheets
     trigger_google_sheets_sync(ticker_name)
     
-    # 2. Masukkan URL Publish to Web CSV Anda di sini
-    SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRLbUkprSxIP60BPBsTGG12NyDaqUEhGWoXER4jKMdETNTAjGUaCv913PQVEgABXf_37hdmU4spLl34/pub?gid=0&single=true&output=csv"
+    # 2. BERI JEDA TUNGGU (PENTING): Memberikan waktu 4 detik agar Google Sheets selesai memuat formula
+    time.sleep(4)
+    
+    # 3. URL Publish to Web CSV Anda yang sudah diperbaiki
+    SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRLbUkprSxIP60BPBsTGG12NyDaqUEhGWoXER4jKMdETNTAjGUaCv913PQVEgABXf_37hdmU4spLl34/pub?output=csv"
     
     try:
         df = pd.read_csv(SHEET_CSV_URL)
         
-        if df.empty:
-            st.error("Google Sheets kosong. Pastikan Apps Script Anda sudah berjalan di Sheets.")
+        if df.empty or len(df) < 5:
+            st.error(f"Google Sheets mendeteksi data '{ticker_name}' masih kosong atau dalam proses memuat di server Google. Coba lakukan refresh beberapa saat lagi.")
             return pd.DataFrame()
 
         # --- NORMALISASI KOLOM MULTI-BAHASA (INGGRIS / INDONESIA) ---
-        # Mengubah semua nama kolom menjadi huruf kecil agar mudah dicocokkan
         df.columns = [str(col).strip().lower() for col in df.columns]
         
         # Deteksi Kolom Tanggal
@@ -89,7 +91,6 @@ def get_crypto_data_from_sheets(ticker_name):
         elif 'tanggal' in df.columns:
             df.rename(columns={'tanggal': 'Date'}, inplace=True)
         else:
-            # Jika baris pertama rusak, paksa kolom pertama menjadi 'Date'
             df.rename(columns={df.columns[0]: 'Date'}, inplace=True)
             
         # Deteksi Kolom Close / Tutup
@@ -98,7 +99,7 @@ def get_crypto_data_from_sheets(ticker_name):
         elif 'tutup' in df.columns:
             df.rename(columns={'tutup': 'Close'}, inplace=True)
             
-        # Deteksi Kolom Lainnya (Open, High, Low, Volume) untuk kebutuhan tampilan .tail()
+        # Deteksi Kolom Lainnya
         kolom_kamus = {
             'open': 'Open', 'buka': 'Open',
             'high': 'High', 'tinggi': 'High',
@@ -107,15 +108,13 @@ def get_crypto_data_from_sheets(ticker_name):
         }
         df.rename(columns=kolom_kamus, inplace=True)
 
-        # Ubah string tanggal menjadi objek datetime Python
+        # Konversi Tanggal
         df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
         df.dropna(subset=['Date'], inplace=True)
         df.set_index('Date', inplace=True)
-        
-        # Urutkan berdasarkan tanggal dari lampau ke terbaru
         df.sort_index(inplace=True)
         
-        # Konversi kolom harga ke angka numeric
+        # Konversi ke Numerik
         for col in ['Open', 'High', 'Low', 'Close', 'Volume']:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors='coerce')
