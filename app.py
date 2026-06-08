@@ -1,5 +1,4 @@
 import streamlit as st
-import yfinance as yf
 import pandas as pd
 import numpy as np
 from statsmodels.tsa.arima.model import ARIMA
@@ -12,7 +11,7 @@ import requests
 
 # --- Pengaturan Halaman Utama ---
 st.title("Aplikasi Prediksi Cryptocurrency Berbasis Hybrid ARIMA-SVR")
-st.write("Aplikasi ini mengombinasikan model klasik ARIMA (Linear) dan Machine Learning SVR (Non-Linear) secara real-time.")
+st.write("Aplikasi ini mengombinasikan data otomatis dari Google Sheets, model klasik ARIMA (Linear), dan Machine Learning SVR (Non-Linear).")
 
 # --- DAFTAR 50 COIN CRYPTO TERPOPULER ---
 CRYPTO_LIST = [
@@ -31,7 +30,7 @@ CRYPTO_LIST = [
 # --- Pengaturan Data di Sidebar ---
 st.sidebar.header("1. Pengaturan Data Crypto")
 selected_crypto = st.sidebar.selectbox("Pilih Koin Crypto", CRYPTO_LIST)
-selected_start_date = st.sidebar.date_input("Tanggal Mulai", datetime.date(2021, 1, 1))
+selected_start_date = st.sidebar.date_input("Tanggal Mulai (Baseline)", datetime.date(2021, 1, 1))
 selected_end_date = st.sidebar.date_input("Tanggal Akhir", datetime.date.today())
 
 if selected_end_date < selected_start_date:
@@ -51,37 +50,53 @@ svr_c = st.sidebar.number_input("Nilai Regulasi (C)", min_value=0.1, max_value=1
 
 forecast_steps = st.sidebar.slider("Horizon Prediksi (Hari ke Depan)", 1, 30, 7)
 
-# --- Fungsi Mengambil Data dari Yahoo Finance ---
-@st.cache_data 
-def get_crypto_data(ticker, start, end):
-    try:
-        df = yf.download(ticker, start=start, end=end)
-        if not df.empty:
-            if isinstance(df.columns, pd.MultiIndex):
-                df.columns = df.columns.droplevel(1)
-            df.index = pd.to_datetime(df.index)
-        return df
-    except Exception as e:
-        st.error(f"Terjadi kesalahan saat mengunduh data: {e}")
-        return pd.DataFrame()
-# memanggil dataset google sheet
+# ==========================================================
+# PEMBAHASAN TERAKHIR: PEMUTAKHIRAN PIPELINE GOOGLE SHEETS
+# ==========================================================
+
 def trigger_google_sheets_sync(ticker_name):
-    """Menyuruh Google Sheets memperbarui data historis sesuai koin yang dipilih di Streamlit."""
-    # Ganti dengan URL Web App milik Apps Script Anda setelah di-Deploy sebagai Web App
+    """Menyuruh Google Sheets memperbarui data historis via Apps Script Web App."""
     WEB_APP_URL = "https://script.google.com/macros/s/12xTac7_IsSbesieiTPKv4kCgjXS2fHuAkBRVIPZiZII/exec"
     try:
-        # Mengirimkan parameter nama koin secara dinamis
+        # Mengirimkan parameter nama koin secara dinamis (?ticker=BTC-USD)
         requests.get(f"{WEB_APP_URL}?ticker={ticker_name}")
     except Exception as e:
-        print(f"Gagal sinkronisasi otomatis: {e}")
-# --- Eksekusi Pengambilan Data ---
-start_str = selected_start_date.strftime("%Y-%m-%d")
-end_str = selected_end_date.strftime("%Y-%m-%d")
-df_crypto = get_crypto_data(selected_crypto, start_str, end_str)
+        st.warning(f"Gagal memicu sinkronisasi cloud: {e}")
+
+@st.cache_data(ttl=3600) # Simpan cache selama 1 jam agar tidak berulang kali menembak url cloud
+def get_crypto_data_from_sheets(ticker_name):
+    """Membaca data historis hasil pemrosesan Google Sheets yang diekspor sebagai CSV."""
+    # SINKRONISASI 1: Picu Web App Apps Script untuk memperbarui Sheets terlebih dahulu
+    trigger_google_sheets_sync(ticker_name)
+    
+    # SINKRONISASI 2: Ambil data dari tautan 'Publish to Web' berbentuk CSV milik Google Sheets Anda
+    # GANTI URL DI BAWAH INI dengan URL hasil "Publikasikan di Web (Sebagai CSV)" dari Google Sheets Anda
+    SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/CEK_KEMBALI_ID_CSV_PUBLISH_ANDA/pub?output=csv"
+    
+    try:
+        df = pd.read_csv(SHEET_CSV_URL)
+        
+        # Sesuai dengan skema output formula =GOOGLEFINANCE() historis
+        # Kolom biasanya: Date, Open, High, Low, Close, Volume
+        df['Date'] = pd.to_datetime(df['Date'])
+        df.set_index('Date', inplace=True)
+        
+        # Memastikan konformitas data numeric
+        for col in ['Open', 'High', 'Low', 'Close', 'Volume']:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+                
+        return df
+    except Exception as e:
+        st.error(f"Gagal memuat data dari Google Sheets. Detail Masalah: {e}")
+        return pd.DataFrame()
+
+# --- Eksekusi Pengambilan Data terintegrasi Google Sheets ---
+df_crypto = get_crypto_data_from_sheets(selected_crypto)
 
 # --- Alur Tampilan Utama Aplikasi ---
 if not df_crypto.empty and 'Close' in df_crypto.columns:
-    st.subheader(f"Data Historis Harga {selected_crypto}")
+    st.subheader(f"Data Historis Harga {selected_crypto} (Sumber: Pipeline Google Sheets)")
     st.write(df_crypto[['Open', 'High', 'Low', 'Close', 'Volume']].tail()) 
     st.line_chart(df_crypto['Close']) 
     
@@ -89,6 +104,7 @@ if not df_crypto.empty and 'Close' in df_crypto.columns:
     if st.button("Jalankan Prediksi Hybrid ARIMA-SVR"):
         with st.spinner(f"Melatih model Hybrid untuk {selected_crypto}..."):
             try:
+                # Sinkronisasi interval harian (DAILY)
                 series_close = df_crypto['Close'].asfreq('D')
                 if series_close.isnull().any():
                     series_close = series_close.ffill()
@@ -123,27 +139,23 @@ if not df_crypto.empty and 'Close' in df_crypto.columns:
                 # Mendapatkan fitted values dari SVR untuk data historis
                 svr_fitted_res = model_svr.predict(X_svr_scaled)
                 
-                # Keselarasan panjang data aktual untuk evaluasi (dipotong sesuai look_back awal)
+                # Keselarasan panjang data aktual untuk evaluasi
                 aktual_evaluasi = series_close.values[look_back:]
                 arima_evaluasi = arima_fitted.values[look_back:]
-                # Hasil Hybrid Historis = Hasil ARIMA + Koreksi SVR
                 hybrid_evaluasi = arima_evaluasi + svr_fitted_res
                 
                 # ==========================================
-                # PENAMBAHAN BARU: HITUNG METRIK EVALUASI (RMSE, MAE, MAPE)
+                # HITUNG METRIK EVALUASI (RMSE, MAE, MAPE)
                 # ==========================================
-                # 1. Evaluasi ARIMA
                 rmse_arima = np.sqrt(mean_squared_error(aktual_evaluasi, arima_evaluasi))
                 mae_arima = mean_absolute_error(aktual_evaluasi, arima_evaluasi)
                 mape_arima = mean_absolute_percentage_error(aktual_evaluasi, arima_evaluasi) * 100
                 
-                # 2. Evaluasi SVR (pada komponen residual)
                 residual_aktual = res_values[look_back:]
                 rmse_svr = np.sqrt(mean_squared_error(residual_aktual, svr_fitted_res))
                 mae_svr = mean_absolute_error(residual_aktual, svr_fitted_res)
                 mape_svr = mean_absolute_percentage_error(residual_aktual, svr_fitted_res) * 100
                 
-                # 3. Evaluasi Model Hybrid (ARIMA + SVR)
                 rmse_hybrid = np.sqrt(mean_squared_error(aktual_evaluasi, hybrid_evaluasi))
                 mae_hybrid = mean_absolute_error(aktual_evaluasi, hybrid_evaluasi)
                 mape_hybrid = mean_absolute_percentage_error(aktual_evaluasi, hybrid_evaluasi) * 100
@@ -237,4 +249,4 @@ if not df_crypto.empty and 'Close' in df_crypto.columns:
             except Exception as e:
                 st.error(f"Gagal memproses model Hybrid. Detail Masalah: {e}")
 else:
-    st.warning(f"Data untuk simbol '{selected_crypto}' gagal dimuat.")
+    st.warning(f"Data untuk simbol '{selected_crypto}' gagal dimuat. Pastikan ID CSV Publish to Web Google Sheets sudah benar.")
