@@ -56,7 +56,7 @@ forecast_steps = st.sidebar.slider("Horizon Prediksi (Hari ke Depan)", 1, 30, 7)
 
 def trigger_google_sheets_sync(ticker_name):
     """Menyuruh Google Sheets memperbarui data historis via Apps Script Web App."""
-    WEB_APP_URL = "https://script.google.com/macros/s/12xTac7_IsSbesieiTPKv4kCgjXS2fHuAkBRVIPZiZII/exec"
+    WEB_APP_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRLbUkprSxIP60BPBsTGG12NyDaqUEhGWoXER4jKMdETNTAjGUaCv913PQVEgABXf_37hdmU4spLl34/pub?gid=0&single=true&output=csv"
     try:
         # Mengirimkan parameter nama koin secara dinamis (?ticker=BTC-USD)
         requests.get(f"{WEB_APP_URL}?ticker={ticker_name}")
