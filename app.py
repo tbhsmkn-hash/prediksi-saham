@@ -5,6 +5,7 @@ import numpy as np
 from statsmodels.tsa.arima.model import ARIMA
 from sklearn.svm import SVR
 from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import mean_squared_error, mean_absolute_error, mean_absolute_percentage_error
 import matplotlib.pyplot as plt
 import datetime
 
@@ -12,7 +13,7 @@ import datetime
 st.title("Aplikasi Prediksi Cryptocurrency Berbasis Hybrid ARIMA-SVR")
 st.write("Aplikasi ini mengombinasikan model klasik ARIMA (Linear) dan Machine Learning SVR (Non-Linear) secara real-time.")
 
-# --- DAFTAR 50 COIN CRYPTO TERPOPULER (Untuk Dropdown sesuai struktur awal) ---
+# --- DAFTAR 50 COIN CRYPTO TERPOPULER ---
 CRYPTO_LIST = [
     "BTC-USD", "ETH-USD", "BNB-USD", "SOL-USD", "XRP-USD", 
     "ADA-USD", "DOGE-USD", "SHIB-USD", "AVAX-USD", "DOT-USD",
@@ -52,7 +53,6 @@ forecast_steps = st.sidebar.slider("Horizon Prediksi (Hari ke Depan)", 1, 30, 7)
 # --- Fungsi Mengambil Data dari Yahoo Finance ---
 @st.cache_data 
 def get_crypto_data(ticker, start, end):
-    """Mengambil data historis cryptocurrency menggunakan pustaka yfinance."""
     try:
         df = yf.download(ticker, start=start, end=end)
         if not df.empty:
@@ -79,7 +79,6 @@ if not df_crypto.empty and 'Close' in df_crypto.columns:
     if st.button("Jalankan Prediksi Hybrid ARIMA-SVR"):
         with st.spinner(f"Melatih model Hybrid untuk {selected_crypto}..."):
             try:
-                # Memastikan frekuensi data harian penuh (24/7)
                 series_close = df_crypto['Close'].asfreq('D')
                 if series_close.isnull().any():
                     series_close = series_close.ffill()
@@ -89,17 +88,12 @@ if not df_crypto.empty and 'Close' in df_crypto.columns:
                 # ==========================================
                 model_arima = ARIMA(series_close, order=(p, d, q))
                 model_arima_fit = model_arima.fit()
-                
-                # Mendapatkan nilai fitted values (prediksi data historis oleh ARIMA)
                 arima_fitted = model_arima_fit.fittedvalues
-                
-                # Hitung nilai Residual (Error non-linear)
                 residuals = series_close - arima_fitted
                 
                 # ==========================================
                 # LANGKAH 2: TRAINING MODEL SVR (NON-LINEAR)
                 # ==========================================
-                # Menyiapkan fitur lag (misal menggunakan 3 nilai residual terakhir untuk memprediksi residual esok)
                 look_back = 3
                 X_svr, y_svr = [], []
                 res_values = residuals.values
@@ -110,41 +104,88 @@ if not df_crypto.empty and 'Close' in df_crypto.columns:
                 
                 X_svr, y_svr = np.array(X_svr), np.array(y_svr)
                 
-                # Normalisasi Fitur untuk SVR agar hasil optimal
                 scaler = StandardScaler()
                 X_svr_scaled = scaler.fit_transform(X_svr)
                 
-                # Melatih model SVR
                 model_svr = SVR(kernel=svr_kernel, C=svr_c)
                 model_svr.fit(X_svr_scaled, y_svr)
                 
+                # Mendapatkan fitted values dari SVR untuk data historis
+                svr_fitted_res = model_svr.predict(X_svr_scaled)
+                
+                # Keselarasan panjang data aktual untuk evaluasi (dipotong sesuai look_back awal)
+                aktual_evaluasi = series_close.values[look_back:]
+                arima_evaluasi = arima_fitted.values[look_back:]
+                # Hasil Hybrid Historis = Hasil ARIMA + Koreksi SVR
+                hybrid_evaluasi = arima_evaluasi + svr_fitted_res
+                
                 # ==========================================
-                # LANGKAH 3: PROSES PERAMALAN (FORECASTING)
+                # PENAMBAHAN BARU: HITUNG METRIK EVALUASI (RMSE, MAE, MAPE)
                 # ==========================================
-                # 3a. Peramalan nilai Linear dengan ARIMA
+                # 1. Evaluasi ARIMA
+                rmse_arima = np.sqrt(mean_squared_error(aktual_evaluasi, arima_evaluasi))
+                mae_arima = mean_absolute_error(aktual_evaluasi, arima_evaluasi)
+                mape_arima = mean_absolute_percentage_error(aktual_evaluasi, arima_evaluasi) * 100
+                
+                # 2. Evaluasi SVR (pada komponen residual)
+                residual_aktual = res_values[look_back:]
+                rmse_svr = np.sqrt(mean_squared_error(residual_aktual, svr_fitted_res))
+                mae_svr = mean_absolute_error(residual_aktual, svr_fitted_res)
+                mape_svr = mean_absolute_percentage_error(residual_aktual, svr_fitted_res) * 100
+                
+                # 3. Evaluasi Model Hybrid (ARIMA + SVR)
+                rmse_hybrid = np.sqrt(mean_squared_error(aktual_evaluasi, hybrid_evaluasi))
+                mae_hybrid = mean_absolute_error(aktual_evaluasi, hybrid_evaluasi)
+                mape_hybrid = mean_absolute_percentage_error(aktual_evaluasi, hybrid_evaluasi) * 100
+
+                # Tampilkan Skor Performa di Halaman Utama Web
+                st.subheader("📊 Evaluasi Performa Model (Data Historis)")
+                
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.markdown(f"""
+                    **Model ARIMA**
+                    * RMSE: `{rmse_arima:.4f}`
+                    * MAE: `{mae_arima:.4f}`
+                    * MAPE: `{mape_arima:.2f}%`
+                    """)
+                with col2:
+                    st.markdown(f"""
+                    **Model SVR (Residual)**
+                    * RMSE: `{rmse_svr:.4f}`
+                    * MAE: `{mae_svr:.4f}`
+                    * MAPE: `{mape_svr:.2f}%`
+                    """)
+                with col3:
+                    st.markdown(f"""
+                    **Model Hybrid (ARIMA-SVR)**
+                    * RMSE: `{rmse_hybrid:.4f}`
+                    * MAE: `{mae_hybrid:.4f}`
+                    * **MAPE: `{mape_hybrid:.2f}%`**
+                    """)
+                
+                # ==========================================
+                # LANGKAH 3: PROSES PERAMALAN (FORECASTING MASA DEPAN)
+                # ==========================================
                 arima_forecast = model_arima_fit.forecast(steps=forecast_steps)
                 
-                # 3b. Peramalan nilai Non-Linear dengan SVR secara berantai (Iterative)
                 svr_forecast = []
-                input_res = list(res_values[-look_back:]) # Ambil data residual terakhir
+                input_res = list(res_values[-look_back:])
                 
                 for _ in range(forecast_steps):
                     input_res_scaled = scaler.transform([input_res[-look_back:]])
                     pred_res = model_svr.predict(input_res_scaled)[0]
                     svr_forecast.append(pred_res)
-                    input_res.append(pred_res) # Memasukkan hasil prediksi sebagai input berikutnya
+                    input_res.append(pred_res)
                 
-                # 3c. Menggabungkan Hasil Prediksi (ARIMA + SVR)
                 hybrid_forecast = arima_forecast.values + np.array(svr_forecast)
                 
                 # ==========================================
-                # LANGKAH 4: VISUALISASI DAN OUTPUT
+                # LANGKAH 4: VISUALISASI DAN OUTPUT CSV
                 # ==========================================
-                # Membuat Indeks Tanggal Masa Depan
                 last_date = series_close.index[-1]
                 forecast_index = pd.date_range(start=last_date + pd.Timedelta(days=1), periods=forecast_steps, freq='D')
                 
-                # Membuat Dataframe Hasil
                 df_forecast = pd.DataFrame({
                     'Prediksi ARIMA (Linear)': arima_forecast.values,
                     'Koreksi SVR (Non-Linear)': svr_forecast,
@@ -152,21 +193,16 @@ if not df_crypto.empty and 'Close' in df_crypto.columns:
                 }, index=forecast_index)
                 df_forecast.index.name = 'Tanggal'
                 
-                # ... (Kode Langkah 4: Tampilkan Tabel Hasil Peramalan sebelumnya) ...
-                st.success(f"Proses peramalan Hybrid selesai untuk {forecast_steps} hari ke depan!")
+                st.subheader(f"🔮 Hasil Peramalan {forecast_steps} Hari ke Depan")
                 st.write(df_forecast)
                 
-                # ==========================================
-                # FITUR TAMBAHAN: DOWNLOAD DATASET TO .CSV
-                # ==========================================
-                # Mengonversi DataFrame ke format CSV (dengan encoding utf-8)
+                # Integrasi Tombol Download CSV
                 @st.cache_data
                 def convert_df_to_csv(df):
                     return df.to_csv(index=True).encode('utf-8')
                 
                 csv_data = convert_df_to_csv(df_forecast)
                 
-                # Menampilkan tombol unduh tepat di bawah tabel
                 st.download_button(
                     label="📥 Unduh Hasil Prediksi (.CSV)",
                     data=csv_data,
@@ -175,7 +211,6 @@ if not df_crypto.empty and 'Close' in df_crypto.columns:
                     key="download-csv"
                 )
                 
-                # ... (Kode Plot Visualisasi Grafis selanjutnya) ...
                 # Plot Visualisasi Perbandingan Grafis
                 fig, ax = plt.subplots(figsize=(10, 5))
                 ax.plot(series_close.tail(30), label='Data Historis Aktual (30 Hari Terakhir)', color='orange', linewidth=2)
