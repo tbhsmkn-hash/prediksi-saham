@@ -14,17 +14,16 @@ st.title("Aplikasi Prediksi Cryptocurrency Berbasis Hybrid ARIMA-SVR")
 st.write("Aplikasi ini mengombinasikan data otomatis dari Google Sheets, model klasik ARIMA (Linear), dan Machine Learning SVR (Non-Linear).")
 
 # --- DAFTAR 50 COIN CRYPTO TERPOPULER ---
+# --- DAFTAR COIN CRYPTO YANG STABIL DI GOOGLE FINANCE ---
 CRYPTO_LIST = [
     "BTC-USD", "ETH-USD", "BNB-USD", "SOL-USD", "XRP-USD", 
-    "ADA-USD", "DOGE-USD", "SHIB-USD", "AVAX-USD", "DOT-USD",
-    "MATIC-USD", "LINK-USD", "TRX-USD", "UNI-USD", "ICP-USD",
-    "BCH-USD", "NEAR-USD", "FIL-USD", "LTC-USD", "LEO-USD",
-    "ETC-USD", "APT-USD", "ATOM-USD", "XLM-USD", "HBAR-USD",
-    "IMX-USD", "GRT-USD", "STX-USD", "KAS-USD", "TON-USD",
-    "PEPE-USD", "WIF-USD", "FLOKI-USD", "RUNE-USD", "RENDER-USD",
-    "THETA-USD", "FTM-USD", "LUNC-USD", "AAVE-USD", "ALGO-USD",
-    "EGLD-USD", "FLOW-USD", "MKR-USD", "SAND-USD", "MANA-USD",
-    "XTZ-USD", "VET-USD", "AXS-USD", "EOS-USD", "NEO-USD"
+    "ADA-USD", "DOGE-USD", "AVAX-USD", "DOT-USD", "LINK-USD", 
+    "TRX-USD", "UNI-USD", "ICP-USD", "BCH-USD", "NEAR-USD", 
+    "FIL-USD", "LTC-USD", "ETC-USD", "APT-USD", "ATOM-USD", 
+    "XLM-USD", "HBAR-USD", "GRT-USD", "STX-USD", "TON-USD",
+    "THETA-USD", "FTM-USD", "AAVE-USD", "ALGO-USD", "EGLD-USD", 
+    "FLOW-USD", "MKR-USD", "SAND-USD", "MANA-USD", "XTZ-USD", 
+    "VET-USD", "AXS-USD", "EOS-USD", "NEO-USD", "LUNC-USD"
 ]
 
 # --- Pengaturan Data di Sidebar ---
