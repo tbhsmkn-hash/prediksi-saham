@@ -8,6 +8,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_squared_error, mean_absolute_error, mean_absolute_percentage_error
 import matplotlib.pyplot as plt
 import datetime
+import requests
 
 # --- Pengaturan Halaman Utama ---
 st.title("Aplikasi Prediksi Cryptocurrency Berbasis Hybrid ARIMA-SVR")
@@ -63,7 +64,16 @@ def get_crypto_data(ticker, start, end):
     except Exception as e:
         st.error(f"Terjadi kesalahan saat mengunduh data: {e}")
         return pd.DataFrame()
-
+# memanggil dataset google sheet
+def trigger_google_sheets_sync(ticker_name):
+    """Menyuruh Google Sheets memperbarui data historis sesuai koin yang dipilih di Streamlit."""
+    # Ganti dengan URL Web App milik Apps Script Anda setelah di-Deploy sebagai Web App
+    WEB_APP_URL = "https://script.google.com/macros/s/12xTac7_IsSbesieiTPKv4kCgjXS2fHuAkBRVIPZiZII/exec"
+    try:
+        # Mengirimkan parameter nama koin secara dinamis
+        requests.get(f"{WEB_APP_URL}?ticker={ticker_name}")
+    except Exception as e:
+        print(f"Gagal sinkronisasi otomatis: {e}")
 # --- Eksekusi Pengambilan Data ---
 start_str = selected_start_date.strftime("%Y-%m-%d")
 end_str = selected_end_date.strftime("%Y-%m-%d")
