@@ -7,7 +7,7 @@ from statsmodels.tsa.arima.model import ARIMA
 from sklearn.svm import SVR
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import mean_absolute_percentage_error, mean_absolute_error, root_mean_squared_error
-import matplotlib.pyplot as plt
+import matplotlib as plt
 
 # Konfigurasi Tampilan Web App
 st.set_page_config(page_title="Sistem Hybrid ARIMA-SVR Indodax v2", layout="wide")
