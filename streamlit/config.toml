@@ -1,0 +1,25 @@
+# .streamlit/config.toml
+
+[theme]
+primaryColor = "#F63366"
+backgroundColor = "#0E1117"
+secondaryBackgroundColor = "#262730"
+textColor = "#FFFFFF"
+font = "sans serif"
+
+[server]
+headless = true
+port = 8501
+enableCORS = false
+enableXsrfProtection = false
+
+st.markdown("""
+    <style>
+    /* Mengurangi margin agar lebih lega di HP */
+    .block-container {
+        padding-top: 2rem;
+        padding-left: 1rem;
+        padding-right: 1rem;
+    }
+    </style>
+""", unsafe_allow_html=True)
